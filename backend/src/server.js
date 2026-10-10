@@ -1,6 +1,9 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
 import { commonRouter } from './routes/common.js'
 import { studentRouter } from './routes/student.js'
 import { facultyRouter } from './routes/faculty.js'
@@ -37,6 +40,16 @@ app.use('/api/student', studentRouter)
 app.use('/api/faculty', facultyRouter)
 app.use('/api/dean', deanRouter)
 app.use('/api/admin', adminRouter)
+
+// Serve the built frontend (single-service deployment on Render)
+const distDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist')
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next()
+    res.sendFile(path.join(distDir, 'index.html'))
+  })
+}
 
 // 404 handler
 app.use((req, res) => {
