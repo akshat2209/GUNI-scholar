@@ -1,0 +1,65 @@
+import { Link } from 'react-router-dom'
+import { Badge, Card, EmptyState, PageHeader, StatCard } from '../../components/ui'
+import * as api from '../../data/api'
+
+export default function AdminDashboard() {
+  const byRole = api.users.reduce((m, u) => ({ ...m, [u.role]: (m[u.role] || 0) + 1 }), {})
+  const activeCourses = api.courses.length
+  const enrollCount = Object.values(api.enrollments).reduce((s, l) => s + l.length, 0)
+  const pendingEval = api.submissions.filter((s) => s.status !== 'evaluated').length
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Platform Overview"
+        sub="Accounts, roles, course structure and platform-level activity. Use the sections below for day-to-day administration."
+        actions={
+          <>
+            <Link to="/admin/users" className="btn btn-primary">Manage users</Link>
+            <Link to="/admin/courses" className="btn btn-secondary">Manage courses</Link>
+          </>
+        }
+      />
+
+      <div className="grid grid-4">
+        <StatCard label="User accounts" value={api.users.length} meta={`${byRole.student} students, ${byRole.faculty} faculty`} />
+        <StatCard label="Active courses" value={activeCourses} meta="Semester 5 running now" />
+        <StatCard label="Enrollments" value={enrollCount} meta="Student-course pairs" />
+        <StatCard label="Evaluations pending" value={pendingEval} meta={pendingEval ? 'Faculty action needed' : 'All evaluated'} />
+      </div>
+
+      <div className="grid grid-2">
+        <Card title="Accounts by role" tight>
+          <ul style={{ listStyle: 'none' }}>
+            {['student', 'faculty', 'dean', 'admin'].map((r) => (
+              <li key={r} className="flex-between" style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{({ student: 'Students', faculty: 'Faculty', dean: 'Deans', admin: 'Admins' })[r]}</span>
+                <Badge tone={r === 'admin' ? 'bad' : r === 'dean' ? 'warn' : r === 'faculty' ? 'info' : 'ok'}>{byRole[r] || 0}</Badge>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        <Card title="Recent platform activity" tight>
+          <ul style={{ listStyle: 'none' }}>
+            <li className="flex-between" style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+              <span className="small">Quiz attempts evaluated, Algorithms</span><Badge tone="ok">{api.attempts.length} total</Badge>
+            </li>
+            <li className="flex-between" style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+              <span className="small">Assignments published</span><Badge tone="neutral">{api.assignments.length}</Badge>
+            </li>
+            <li className="flex-between" style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+              <span className="small">Announcements posted</span><Badge tone="neutral">{api.announcements.length}</Badge>
+            </li>
+            <li className="flex-between" style={{ padding: '12px 0' }}>
+              <span className="small">Suspended accounts</span>
+              <Badge tone={api.users.some((u) => u.status === 'suspended') ? 'warn' : 'ok'}>
+                {api.users.filter((u) => u.status === 'suspended').length}
+              </Badge>
+            </li>
+          </ul>
+        </Card>
+      </div>
+    </div>
+  )
+}

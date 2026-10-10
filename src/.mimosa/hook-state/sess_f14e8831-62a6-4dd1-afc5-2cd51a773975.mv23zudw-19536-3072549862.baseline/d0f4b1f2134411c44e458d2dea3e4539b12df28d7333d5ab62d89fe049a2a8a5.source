@@ -1,0 +1,40 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+
+const AuthContext = createContext(null)
+const KEY = 'guni.user'
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(KEY) || 'null') } catch { return null }
+  })
+
+  useEffect(() => {
+    if (user) localStorage.setItem(KEY, JSON.stringify(user))
+    else localStorage.removeItem(KEY)
+  }, [user])
+
+  const login = useCallback((email, password) => {
+    // Demo credentials: every seeded account uses the password guni123.
+    const account = email.trim().toLowerCase()
+    return import('../data/mock').then(({ users, demoPassword }) => {
+      const found = users.find((u) => u.email.toLowerCase() === account)
+      if (!found || password !== demoPassword) throw new Error('Incorrect email or password. Check the demo credentials below.')
+      const { password: _pw, ...safe } = found
+      setUser(safe)
+      return safe
+    })
+  }, [])
+
+  const logout = useCallback(() => setUser(null), [])
+
+  const value = useMemo(() => ({ user, login, logout }), [user, login, logout])
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
+  return ctx
+}
+
+export const roleHome = (role) => ({ student: '/student', faculty: '/faculty', dean: '/dean', admin: '/admin' }[role] || '/')

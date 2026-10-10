@@ -1,0 +1,126 @@
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { AlertTriangle, ChevronRight } from 'lucide-react'
+import { Badge, Card, Loading, MasteryRow, PageHeader, StatCard, riskTone } from '../../components/ui'
+import { ScoreTrend, MasteryBars, EngagementArea } from '../../components/charts'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+export default function StudentAnalytics() {
+  const { user } = useAuth()
+  const { courseId } = useParams()
+  const courses = api.studentCourses(user.id)
+  const active = courses.find((c) => c.id === courseId) || courses[0]
+  const [data, setData] = useState(null)
+
+  useEffect(() => {
+    setData(null)
+    api.getStudentCourseAnalytics(user.id, active.id).then(setData)
+  }, [user.id, active.id])
+
+  if (!data) return <Loading label="Crunching your analytics" />
+
+  const trend = [...data.scores].map((s) => ({ week: `W${s.week}`, pct: Math.round(100 * s.score / s.total), title: s.title }))
+  const masteryData = data.mastery.map((m) => ({ name: m.short, mastery: m.mastery }))
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="My Performance Analytics"
+        sub={`Learning activity and topic-wise performance for ${active.code} ${active.title}. Switch courses below.`}
+      />
+      <div className="wrap-gap" role="navigation" aria-label="Switch course">
+        {courses.map((c) => (
+          <Link key={c.id} to={`/student/analytics/${c.id}`} className={`btn btn-sm ${c.id === active.id ? 'btn-primary' : 'btn-secondary'}`} aria-current={c.id === active.id ? 'true' : undefined}>
+            {c.short}
+          </Link>
+        ))}
+      </div>
+
+      <div className="grid grid-4">
+        <StatCard label="Assessment average" value={`${Math.round(data.avgScore)}%`} meta={`${data.scores.length} evaluated quizzes`} />
+        <StatCard label="Strongest topic" value={data.mastery.filter((m) => m.mastery != null).sort((a, b) => b.mastery - a.mastery)[0]?.short || 'N/A'} meta="Highest mastery score" />
+        <StatCard label="Weakest topic" value={data.mastery.filter((m) => m.mastery != null).sort((a, b) => a.mastery - b.mastery)[0]?.short || 'N/A'} meta="Lowest mastery score" />
+        <StatCard label="Late submissions" value={data.lateStreak} meta="Consecutive in this course" />
+      </div>
+
+      <div className="grid grid-2">
+        <Card title="Assessment score history" sub="Percentage score per evaluated quiz, oldest first.">
+          <ScoreTrend data={trend} />
+        </Card>
+        <Card title="Learning engagement trend" sub="Course material views per week. A steady decline feeds the risk model.">
+          <EngagementArea weeks={data.engagementWeeks} views={data.engagement} />
+        </Card>
+      </div>
+
+      <Card title="Topic-wise mastery" sub="Quizzes weigh 60 percent and evaluated assignments 40 percent of each topic score.">
+        <div className="grid grid-2">
+          <MasteryBars data={masteryData} />
+          <div>
+            {data.mastery.map((m) => <MasteryRow key={m.id} name={m.name} value={m.mastery} />)}
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-2">
+        <Card title="Academic risk score" actions={<Badge tone={riskTone(data.risk.band)}>{data.risk.band} risk</Badge>}>
+          <div className="risk-score">
+            <span className="big" style={{ color: data.risk.band === 'High' ? 'var(--bad-text)' : data.risk.band === 'Medium' ? 'var(--warn-text)' : 'var(--ok-text)' }}>
+              {data.risk.score}<span style={{ fontSize: 18, color: 'var(--ink-400)' }}>/100</span>
+            </span>
+            <p className="small muted" style={{ flex: 1, minWidth: 200 }}>
+              Additive model with fixed indicator weights, so every point is traceable to evidence. It combines
+              assessments, submission behaviour, topic mastery and engagement instead of exam marks alone.
+            </p>
+          </div>
+          <ul className="risk-list">
+            {data.risk.indicators.map((i) => (
+              <li key={i.label}><AlertTriangle size={17} color="var(--warn-text)" aria-hidden="true" />
+                <span><strong>{i.label} (+{i.points} pts).</strong> {i.evidence}</span>
+              </li>
+            ))}
+            {data.risk.indicators.length === 0 && <li>No indicators active. All monitored signals are healthy.</li>}
+          </ul>
+        </Card>
+
+        <Card title="Suggested areas for improvement" sub="Ordered by mastery score. Each suggestion links to material on the course page.">
+          <ol style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {data.recommendations.map((r) => (
+              <li key={r.topic.id} style={{ fontSize: 14.5 }}>
+                <strong>{r.topic.name}</strong> <Badge tone={r.mastery < 40 ? 'bad' : 'warn'}>{r.mastery}%</Badge>
+                <p className="small muted mt-8">{r.reason}</p>
+                <Link to={`/student/knowledge-map/${active.id}`} className="small flex" style={{ gap: 4, marginTop: 4 }}>
+                  Open in knowledge map <ChevronRight size={13} aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+            {data.recommendations.length === 0 && <p className="muted small">No topic is currently below the improvement threshold.</p>}
+          </ol>
+        </Card>
+      </div>
+
+      <Card title="Assignment submission history" tight>
+        <div className="table-wrap" style={{ boxShadow: 'none', border: 'none' }}>
+          <table className="data" style={{ minWidth: 560 }}>
+            <thead><tr><th>Assignment</th><th>Topic</th><th>Submitted</th><th>Status</th><th className="num">Marks</th></tr></thead>
+            <tbody>
+              {data.assignments.map((a) => (
+                <tr key={a.id}>
+                  <td><Link to={`/student/assignments/${a.id}`}>{a.title}</Link></td>
+                  <td>{api.getTopic(active.id, a.topicId)?.name}</td>
+                  <td>{a.submission ? a.submission.submittedAt : 'Not submitted'}</td>
+                  <td>
+                    {a.submission
+                      ? (a.submission.submittedAt.includes('late') ? <Badge tone="warn">Late</Badge> : <Badge tone="ok">On time</Badge>)
+                      : <Badge tone="bad">Pending</Badge>}
+                  </td>
+                  <td className="num">{a.submission?.status === 'evaluated' ? `${a.submission.marks}/${a.maxMarks}` : 'Not graded'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}

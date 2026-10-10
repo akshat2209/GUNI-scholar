@@ -1,0 +1,120 @@
+import { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { Download, FileText, Film, NotebookPen, PencilLine } from 'lucide-react'
+import { Card, EmptyState, Loading, PageHeader } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+const typeIcon = { notes: NotebookPen, slides: FileText, video: Film, practice: PencilLine }
+
+export function CourseCardGrid({ courses, detailBase }) {
+  return (
+    <div className="grid grid-3">
+      {courses.map((c) => {
+        const f = api.getUser(c.facultyId)
+        return (
+          <article key={c.id} className="card card-pad">
+            <div className="flex-between">
+              <span className="badge badge-brand">{c.code}</span>
+              <span className="small muted">{c.credits} credits</span>
+            </div>
+            <h3 className="mt-8" style={{ fontSize: 16 }}>{c.title}</h3>
+            <p className="small muted mt-8">{c.dept} &middot; Semester {c.sem}</p>
+            <p className="small muted">Faculty: {f?.name}</p>
+            <Link className="btn btn-secondary btn-sm mt-16" to={`${detailBase}/${c.id}`}>Open course</Link>
+          </article>
+        )
+      })}
+    </div>
+  )
+}
+
+function CourseDetail({ courseId }) {
+  const course = api.getCourse(courseId)
+  const topics = api.getTopics(courseId)
+  const all = api.resourcesForCourse(courseId)
+  const [topicFilter, setTopicFilter] = useState('all')
+  const shown = topicFilter === 'all' ? all : all.filter((r) => r.topicId === topicFilter)
+  const faculty = api.getUser(course.facultyId)
+  const anns = api.announcementsForCourse(courseId)
+
+  if (!course) return <EmptyState title="Course not found">This course does not exist or you are not enrolled in it.</EmptyState>
+
+  return (
+    <div className="page">
+      <PageHeader
+        title={course.title}
+        sub={`${course.code} &middot; ${course.credits} credits &middot; ${course.dept}, semester ${course.sem}. Taught by ${faculty?.name} (${faculty?.email}).`}
+        actions={<Link to="/student/courses" className="btn btn-secondary btn-sm">All courses</Link>}
+      />
+
+      <div className="grid grid-2" style={{ gridTemplateColumns: '2fr 1fr' }}>
+        <Card title="Study material by topic" sub="Filter by topic to find resources for exactly what you are studying.">
+          <div className="filter-bar mb-16">
+            <div className="field">
+              <label htmlFor="topicFilter">Filter by topic</label>
+              <select id="topicFilter" className="select" value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
+                <option value="all">All topics</option>
+                {topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {shown.length === 0 ? (
+            <EmptyState title="No material here yet">Resources for this filter have not been published. Check the announcements for updates.</EmptyState>
+          ) : (
+            <ul style={{ listStyle: 'none' }}>
+              {shown.map((r) => {
+                const Icon = typeIcon[r.type] || FileText
+                return (
+                  <li key={r.id} className="res-row">
+                    <span className="res-icon"><Icon size={17} aria-hidden="true" /></span>
+                    <div className="res-main">
+                      <div className="res-title">{r.title}</div>
+                      <div className="res-meta">
+                        {r.type} &middot; {r.size} &middot; week {r.week} &middot; {topics.find((t) => t.id === r.topicId)?.name}
+                      </div>
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => window.alert(`In the full build this opens "${r.title}". Prototype shows the workflow only.`)}>
+                      <Download size={15} aria-hidden="true" /> Open
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Course announcements" tight>
+          {anns.length === 0 ? (
+            <EmptyState title="No announcements">Nothing posted for this course yet.</EmptyState>
+          ) : anns.map((an) => (
+            <div key={an.id} className="ann-item">
+              <h3>{an.title}</h3>
+              <p className="ann-meta">{an.date} &middot; {api.getUser(an.authorId).name}</p>
+              <p className="small mt-8 muted">{an.body}</p>
+            </div>
+          ))}
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+export default function StudentCourses() {
+  const { user } = useAuth()
+  const { courseId } = useParams()
+  const courses = api.studentCourses(user.id)
+
+  if (!courses.length) return <Loading label="Loading courses" />
+  if (courseId) return <CourseDetail courseId={courseId} />
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="My Courses"
+        sub={`You are enrolled in ${courses.length} courses this semester. Open a course to see its material, topics and announcements.`}
+      />
+      <CourseCardGrid courses={courses} detailBase="/student/courses" />
+    </div>
+  )
+}

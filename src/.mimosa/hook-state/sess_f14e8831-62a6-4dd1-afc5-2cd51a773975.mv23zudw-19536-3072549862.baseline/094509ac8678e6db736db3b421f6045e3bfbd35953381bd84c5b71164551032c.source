@@ -1,0 +1,134 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, ChevronRight } from 'lucide-react'
+import { Badge, Card, EmptyState, Loading, PageHeader, StatCard, riskTone } from '../../components/ui'
+import { EngagementArea } from '../../components/charts'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+export default function FacultyDashboard() {
+  const { user } = useAuth()
+  const [data, setData] = useState(null)
+
+  useEffect(() => { api.getFacultyDashboard(user.id).then(setData) }, [user.id])
+  if (!data) return <Loading label="Loading faculty dashboard" />
+
+  const atRisk = data.students.filter((s) => s.risk.band !== 'Low')
+  const pendingEval = data.courseRows.reduce((s, r) => s + r.pendingEval, 0)
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Faculty Dashboard"
+        sub={`Teaching overview for ${user.name}. Risk alerts are explainable: open a student to see the exact indicators behind their score.`}
+        actions={<Link to="/faculty/heatmap" className="btn btn-primary">Open confusion heatmap</Link>}
+      />
+
+      <div className="grid grid-4">
+        <StatCard label="Courses taught" value={data.courseRows.length} meta={data.courseRows.map((r) => r.course.short).join(', ')} />
+        <StatCard label="Students" value={data.students.length} meta="Across all your courses" />
+        <StatCard label="Submissions to evaluate" value={pendingEval} meta={pendingEval ? 'Evaluation pending' : 'All caught up'} />
+        <StatCard label="Students needing support" value={atRisk.length} meta="Medium or high risk band" />
+      </div>
+
+      <div className="grid grid-2">
+        <Card title="Explainable academic risk alerts" sub="Students in your courses ranked by risk score, with the contributing indicators.">
+          {atRisk.length === 0 ? (
+            <EmptyState title="No risk alerts">No student in your courses is currently in the medium or high risk band.</EmptyState>
+          ) : (
+            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {atRisk.map(({ student, risk, course, avgScore }) => (
+                <li key={student.id} className="card card-pad" style={{ boxShadow: 'none', borderLeft: `3px solid ${risk.band === 'High' ? 'var(--bad-text)' : 'var(--warn-text)'}` }}>
+                  <div className="flex-between">
+                    <div>
+                      <strong>{student.name}</strong> <span className="small muted">{student.rollNo}, {course.short}</span>
+                    </div>
+                    <Badge tone={riskTone(risk.band)}>{risk.band} risk, {risk.score}/100</Badge>
+                  </div>
+                  <ul className="risk-list" style={{ marginTop: 8 }}>
+                    {risk.indicators.slice(0, 2).map((i) => (
+                      <li key={i.label}><AlertTriangle size={15} color="var(--warn-text)" aria-hidden="true" />
+                        <span className="small">{i.label}: {i.evidence}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex-between mt-16">
+                    <span className="small muted">Assessment average {Math.round(avgScore)}%</span>
+                    <Link className="btn btn-secondary btn-sm" to={`/faculty/students/${student.id}`}>
+                      View details and interventions <ChevronRight size={13} aria-hidden="true" />
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="Courses and evaluation status" tight>
+            <div className="table-wrap" style={{ border: 'none', boxShadow: 'none' }}>
+              <table className="data" style={{ minWidth: 480 }}>
+                <thead><tr><th>Course</th><th className="num">Students</th><th className="num">Assignments</th><th className="num">To evaluate</th></tr></thead>
+                <tbody>
+                  {data.courseRows.map((r) => (
+                    <tr key={r.course.id}>
+                      <td><Link to={`/faculty/courses/${r.course.id}`} style={{ fontWeight: 600 }}>{r.course.code} {r.course.short}</Link></td>
+                      <td className="num">{r.students}</td>
+                      <td className="num">{r.assignments}</td>
+                      <td className="num">{r.pendingEval ? <Badge tone="warn">{r.pendingEval}</Badge> : <Badge tone="ok">0</Badge>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <Card title="Topic-wise class performance" sub="Average incorrect rate per topic across your DAA quizzes. High bars are teaching priorities.">
+            <ClassTopicBars courseId="cs301" />
+          </Card>
+        </div>
+      </div>
+
+      <Card title="Recommended interventions" sub="Actions suggested by the risk model for your highest-risk students.">
+        <div className="grid grid-3">
+          {atRisk.slice(0, 3).map(({ student, weakTopics, risk }) => (
+            <div key={student.id} className="card card-pad" style={{ boxShadow: 'none' }}>
+              <Badge tone={riskTone(risk.band)}>{student.name}</Badge>
+              <h3 className="mt-8">{weakTopics.length ? `Support in ${weakTopics.slice(0, 2).join(' and ')}` : 'General submission discipline'}</h3>
+              <p className="small muted mt-8">
+                {risk.band === 'High'
+                  ? 'Consider one-on-one tutoring support and a check-in before the next assessment.'
+                  : 'Send a nudge with the relevant micro-modules and monitor the next quiz closely.'}
+              </p>
+            </div>
+          ))}
+          {atRisk.length === 0 && <p className="muted small">No interventions needed right now.</p>}
+        </div>
+      </Card>
+
+      <Card title="Engagement snapshot, Algorithms course" sub="Aggregate resource views per week for the whole class.">
+        <EngagementArea weeks={['W3', 'W4', 'W5', 'W6', 'W7', 'W8']} views={[95, 88, 74, 61, 55, 49]} color="#c41e24" />
+      </Card>
+    </div>
+  )
+}
+
+function ClassTopicBars({ courseId }) {
+  const rows = api.getTopics(courseId)
+    .map((t) => ({ t, agg: api._confusionFor(courseId, t.id) }))
+    .filter((r) => r.agg)
+    .sort((a, b) => b.agg.incorrectPct - a.agg.incorrectPct)
+  return (
+    <ul style={{ listStyle: 'none' }}>
+      {rows.map(({ t, agg }) => (
+        <li key={t.id} className="mastery-row">
+          <span className="t">{t.name}</span>
+          <div className="progress bad" role="img" aria-label={`${t.name}: ${agg.incorrectPct} percent incorrect`}>
+            <span style={{ width: `${agg.incorrectPct}%` }} />
+          </div>
+          <span className="v">{agg.incorrectPct}%</span>
+        </li>
+      ))}
+    </ul>
+  )
+}

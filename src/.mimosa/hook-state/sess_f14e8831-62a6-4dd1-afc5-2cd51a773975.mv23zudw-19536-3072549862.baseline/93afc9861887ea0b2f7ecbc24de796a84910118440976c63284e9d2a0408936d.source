@@ -1,0 +1,136 @@
+import { useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { Badge, Card, Loading, PageHeader, StatCard, Tabs, riskTone } from '../../components/ui'
+import { TrendLine, RiskDistribution } from '../../components/charts'
+import * as api from '../../data/api'
+
+const TABS = [
+  { id: 'performance', label: 'Course performance' },
+  { id: 'risk', label: 'Risk summary' },
+  { id: 'topics', label: 'Difficult topics' },
+  { id: 'engagement', label: 'Engagement' },
+]
+
+export default function DeanDashboard() {
+  const [tab, setTab] = useState('performance')
+  const stats = api.deanCourseStats
+  const rows = Object.entries(stats).map(([id, s]) => ({ course: api.getCourse(id), ...s }))
+  const totals = rows.reduce((a, r) => ({ high: a.high + r.riskHigh, med: a.med + r.riskMedium, low: a.low + r.riskLow }), { high: 0, med: 0, low: 0 })
+  const difficult = Object.entries(api.confusion).flatMap(([courseId, tps]) =>
+    Object.entries(tps).map(([tid, agg]) => ({ topic: api.getTopic(courseId, tid), course: api.getCourse(courseId), ...agg })),
+  ).filter((d) => d.topic).sort((a, b) => b.incorrectPct - a.incorrectPct)
+
+  if (!rows[0].course) return <Loading />
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Academic Overview"
+        sub="Institute-level view across all B.Tech CSE semester 5 courses. Aggregates only: individual students are visible to their own faculty, not here."
+      />
+
+      <div className="grid grid-4">
+        <StatCard label="Courses tracked" value={rows.length} meta="Semester 5, B.Tech CSE" />
+        <StatCard label="Students at risk" value={totals.high + totals.med} meta={`${totals.high} high, ${totals.med} medium band`} />
+        <StatCard label="Average score" value={`${Math.round(rows.reduce((s, r) => s + r.avgScore, 0) / rows.length)}%`} meta="Across all courses" />
+        <StatCard label="Common difficult topic" value={difficult[0]?.topic.short || 'N/A'} meta={`${difficult[0]?.incorrectPct}% incorrect, ${difficult[0]?.course.short}`} />
+      </div>
+
+      <Card>
+        <Tabs tabs={TABS} active={tab} onChange={setTab} label="Academic overview sections" />
+        <div className="card-body">
+          {tab === 'performance' && (
+            <div className="table-wrap" style={{ border: 'none', boxShadow: 'none' }}>
+              <table className="data" style={{ minWidth: 640 }}>
+                <thead><tr><th>Course</th><th className="num">Avg score</th><th className="num">Submission rate</th><th className="num">Risk high</th><th className="num">Risk medium</th><th>Trend (W5 to W8)</th></tr></thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.course.id}>
+                      <td style={{ fontWeight: 600 }}>{r.course.code} {r.course.short}</td>
+                      <td className="num">{r.avgScore}%</td>
+                      <td className="num">{r.submissionRate}%</td>
+                      <td className="num">{r.riskHigh}</td>
+                      <td className="num">{r.riskMedium}</td>
+                      <td style={{ minWidth: 160 }}>
+                        <div className="flex" style={{ gap: 4 }}>
+                          {r.trend.map((v, i) => (
+                            <span key={i} style={{ width: 22, height: 22 * (v / 100) + 4, background: i === r.trend.length - 1 ? '#c41e24' : '#f3c1c1', borderRadius: 2, alignSelf: 'flex-end' }} aria-hidden="true" />
+                          ))}
+                          <span className="small muted">{r.trend[r.trend.length - 1]}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {tab === 'risk' && (
+            <div className="grid grid-2">
+              <div>
+                <h3 className="mb-16">Risk distribution across the semester</h3>
+                <RiskDistribution data={[
+                  { band: 'Low', students: totals.low, color: '#12b76a' },
+                  { band: 'Medium', students: totals.med, color: '#f79009' },
+                  { band: 'High', students: totals.high, color: '#c41e24' },
+                ]} />
+              </div>
+              <div>
+                <h3 className="mb-16">By course</h3>
+                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {rows.map((r) => (
+                    <li key={r.course.id} className="flex-between" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{r.course.short}</span>
+                      <span className="wrap-gap">
+                        <Badge tone="ok">{r.riskLow} low</Badge>
+                        <Badge tone="warn">{r.riskMedium} med</Badge>
+                        <Badge tone={r.riskHigh ? 'bad' : 'ok'}>{r.riskHigh} high</Badge>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {tab === 'topics' && (
+            <>
+              <p className="small muted mb-16">Topics where the largest share of evaluated answers across the institute was incorrect. These are candidates for curriculum or teaching-time review.</p>
+              <div className="table-wrap" style={{ border: 'none', boxShadow: 'none' }}>
+                <table className="data" style={{ minWidth: 560 }}>
+                  <thead><tr><th>Topic</th><th>Course</th><th className="num">Incorrect</th><th className="num">Responses</th></tr></thead>
+                  <tbody>
+                    {difficult.map((d) => (
+                      <tr key={d.course.id + d.topic.id}>
+                        <td style={{ fontWeight: 600 }}>{d.topic.name}</td>
+                        <td>{d.course.short}</td>
+                        <td className="num">
+                          <Badge tone={d.incorrectPct >= 60 ? 'bad' : d.incorrectPct >= 40 ? 'warn' : 'ok'}>{d.incorrectPct}%</Badge>
+                        </td>
+                        <td className="num">{d.responses}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {tab === 'engagement' && (
+            <>
+              <h3 className="mb-8">Submission and engagement trend, institute average</h3>
+              <TrendLine data={[
+                { label: 'W5', value: 84 }, { label: 'W6', value: 82 }, { label: 'W7', value: 78 }, { label: 'W8', value: 76 },
+              ]} name="Aggregate engagement index" />
+              <p className="small muted mt-16 flex" style={{ gap: 6 }}>
+                <AlertTriangle size={15} color="var(--warn-text)" aria-hidden="true" />
+                The index blends resource views and on-time submissions. The slow decline tracks the algorithms course; faculty have been notified through their dashboards.
+              </p>
+            </>
+          )}
+        </div>
+      </Card>
+    </div>
+  )
+}

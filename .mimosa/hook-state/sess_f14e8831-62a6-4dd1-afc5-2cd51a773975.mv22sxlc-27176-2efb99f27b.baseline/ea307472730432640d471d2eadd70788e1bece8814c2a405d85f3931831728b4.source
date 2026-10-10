@@ -1,0 +1,379 @@
+// Async data access and analytics over the mock dataset. Every function
+// returns a promise with a short delay so loading states are exercised.
+import {
+  users, courses, enrollments, topics, resources, assignments, submissions,
+  assessments, attempts, classmateStats, announcements, confusion,
+  engagementWeeks, engagementViews, deanCourseStats,
+} from './mock'
+
+const delay = (ms = 280) => new Promise((r) => setTimeout(r, ms))
+const uid = (prefix) => prefix + '-' + crypto.randomUUID().slice(0, 8)
+
+// ---------- lookup helpers ----------
+export const getUser = (id) => users.find((u) => u.id === id)
+export const getCourse = (id) => courses.find((c) => c.id === id)
+export const getTopics = (courseId) => topics[courseId] || []
+export const getTopic = (courseId, topicId) => getTopics(courseId).find((t) => t.id === topicId)
+export const getAssessmentsForCourse = (courseId) => assessments.filter((a) => a.courseId === courseId && a.published)
+export const getAssessment = (id) => assessments.find((a) => a.id === id)
+
+export function studentCourses(studentId) {
+  return courses.filter((c) => (enrollments[c.id] || []).includes(studentId))
+}
+export function facultyCourses(facultyId) {
+  return courses.filter((c) => c.facultyId === facultyId)
+}
+// Aggregate confusion figures for one course topic (hand-tuned in mock data).
+export function _confusionFor(courseId, topicId) {
+  return (confusion[courseId] || {})[topicId] || null
+}
+export function courseStudents(courseId) {
+  return (enrollments[courseId] || []).map(getUser).filter(Boolean)
+}
+
+// ---------- quiz analytics ----------
+export function getAttempt(assessmentId, studentId) {
+  return attempts.find((a) => a.assessmentId === assessmentId && a.studentId === studentId)
+}
+
+// Records a freshly submitted attempt so scores, mastery and the class
+// heatmap reflect it immediately (in-memory for the session).
+export function _recordAttempt(assessmentId, studentId, { wrong, score }) {
+  attempts.push({ assessmentId, studentId, wrong, score, submittedAt: 'Just now' })
+}
+
+// Per-topic mastery for one student in one course. Quizzes weigh 60 percent,
+// evaluated assignments 40 percent. Topics with no evidence return null.
+export function topicMastery(studentId, courseId) {
+  const topicList = getTopics(courseId)
+  const quizAgg = {}
+  for (const a of assessments) {
+    if (a.courseId !== courseId) continue
+    const att = getAttempt(a.id, studentId)
+    if (!att) continue
+    for (const q of a.questions) {
+      const agg = (quizAgg[q.topicId] ||= { correct: 0, total: 0 })
+      agg.total += 1
+      if (!att.wrong.includes(q.id)) agg.correct += 1
+    }
+  }
+  const asgAgg = {}
+  for (const asg of assignments) {
+    if (asg.courseId !== courseId) continue
+    const sub = submissions.find((s) => s.assignmentId === asg.id && s.studentId === studentId)
+    if (sub && sub.status === 'evaluated' && typeof sub.marks === 'number') {
+      asgAgg[asg.topicId] ||= { pct: 0, n: 0 }
+      asgAgg[asg.topicId].pct += sub.marks
+      asgAgg[asg.topicId].n += 1
+    }
+  }
+  return topicList.map((t) => {
+    const qz = quizAgg[t.id]
+    const as = asgAgg[t.id]
+    let mastery = null
+    if (qz && as) mastery = Math.round(0.6 * (100 * qz.correct / qz.total) + 0.4 * (as.pct / as.n))
+    else if (qz) mastery = Math.round(100 * qz.correct / qz.total)
+    else if (as) mastery = Math.round(as.pct / as.n)
+    return { ...t, mastery }
+  })
+}
+
+export function masteryBand(m) {
+  if (m == null) return { key: 'none', label: 'Not assessed', color: '#cfcfd6' }
+  if (m >= 70) return { key: 'mastered', label: 'Mastered', color: '#12b76a' }
+  if (m >= 40) return { key: 'developing', label: 'Developing', color: '#f79009' }
+  return { key: 'weak', label: 'Needs improvement', color: '#c41e24' }
+}
+
+function quizScores(studentId, courseId) {
+  return assessments
+    .filter((a) => a.courseId === courseId && a.published)
+    .map((a) => {
+      const att = getAttempt(a.id, studentId)
+      return att ? { assessmentId: a.id, title: a.title, week: a.week, score: att.score, total: a.questions.length, submittedAt: att.submittedAt } : null
+    })
+    .filter(Boolean)
+}
+
+// ---------- risk model (explainable, additive, capped at 100) ----------
+// Points per indicator are fixed and shown in the UI, so any score can be
+// traced back to its evidence. Bands: Low 0-29, Medium 30-59, High 60+.
+export function riskProfile({ avgScore, lateStreak, weakTopicCount, engagementDeclining, pendingUrgent }) {
+  const indicators = []
+  if (avgScore < 60) {
+    const pts = avgScore < 50 ? 25 : 15
+    indicators.push({ label: 'Assessment average below 60 percent', evidence: `Current average is ${Math.round(avgScore)} percent across evaluated quizzes.`, points: pts })
+  }
+  if (lateStreak >= 2) {
+    indicators.push({ label: 'Repeated late submissions', evidence: `${lateStreak} consecutive late submissions recorded.`, points: lateStreak >= 3 ? 25 : 15 })
+  }
+  if (weakTopicCount > 0) {
+    indicators.push({ label: 'Weak topic mastery', evidence: `${weakTopicCount} topic${weakTopicCount > 1 ? 's' : ''} below 40 percent mastery.`, points: Math.min(weakTopicCount * 10, 15) })
+  }
+  if (engagementDeclining) {
+    indicators.push({ label: 'Declining learning engagement', evidence: 'Resource views have fallen for three or more consecutive weeks.', points: 10 })
+  }
+  if (pendingUrgent) {
+    indicators.push({ label: 'Urgent pending work', evidence: 'An assignment deadline is within 48 hours and not submitted.', points: 10 })
+  }
+  const score = Math.min(indicators.reduce((s, i) => s + i.points, 0), 100)
+  const band = score >= 60 ? 'High' : score >= 30 ? 'Medium' : 'Low'
+  return { score, band, indicators }
+}
+
+export function studentEngagement(studentId) {
+  const out = []
+  for (const [courseId, series] of Object.entries(engagementViews)) {
+    if (!studentCourses(studentId).some((c) => c.id === courseId)) continue
+    for (let i = 0; i < series.length; i++) out.push({ week: engagementWeeks[i], views: series[i], courseId })
+  }
+  return out
+}
+
+function engagementDeclining(studentId) {
+  const daa = engagementViews.cs301
+  let down = 0
+  for (let i = 1; i < daa.length; i++) if (daa[i] < daa[i - 1]) down++
+  return down >= 3
+}
+
+// Full analytics bundle for the demo student in one course.
+export async function getStudentCourseAnalytics(studentId, courseId) {
+  await delay()
+  const mastery = topicMastery(studentId, courseId)
+  const scores = quizScores(studentId, courseId)
+  const asgs = assignments.filter((a) => a.courseId === courseId).map((a) => {
+    const sub = submissions.find((s) => s.assignmentId === a.id && s.studentId === studentId)
+    return { ...a, submission: sub || null }
+  })
+  const avgScore = scores.length ? scores.reduce((s, x) => s + x.score / x.total * 100, 0) / scores.length : 0
+  const lateStreak = computeLateStreak(studentId, courseId)
+  const weakTopics = mastery.filter((m) => m.mastery != null && m.mastery < 40)
+  const pendingUrgent = asgs.some((a) => !a.submission && a.due.startsWith('in '))
+  const risk = riskProfile({
+    avgScore, lateStreak,
+    weakTopicCount: weakTopics.length,
+    engagementDeclining: engagementDeclining(studentId),
+    pendingUrgent,
+  })
+  return {
+    mastery, scores, assignments: asgs, avgScore, lateStreak,
+    engagement: engagementViews[courseId] || [],
+    engagementWeeks,
+    risk,
+    recommendations: buildRecommendations(courseId, mastery),
+  }
+}
+
+function computeLateStreak(studentId, courseId) {
+  let streak = 0
+  const courseAsgs = assignments.filter((a) => a.courseId === courseId)
+  for (const a of [...courseAsgs].reverse()) {
+    const sub = submissions.find((s) => s.assignmentId === a.id && s.studentId === studentId)
+    if (sub && sub.submittedAt.includes('late')) streak++
+    else if (sub) break
+  }
+  return streak
+}
+
+function buildRecommendations(courseId, mastery) {
+  const weak = mastery.filter((m) => m.mastery != null && m.mastery < 55).sort((a, b) => a.mastery - b.mastery)
+  return weak.slice(0, 3).map((m) => {
+    const res = resources.filter((r) => r.courseId === courseId && r.topicId === m.id)
+    return { topic: m, mastery: m.mastery, resources: res, reason: `Mastery is ${m.mastery} percent, below the 55 percent comfort line.` }
+  })
+}
+
+// ---------- faculty views ----------
+export async function getFacultyDashboard(facultyId) {
+  await delay()
+  const myCourses = facultyCourses(facultyId)
+  const courseRows = myCourses.map((c) => {
+    const studs = courseStudents(c.id)
+    const courseAsgs = assignments.filter((a) => a.courseId === c.id)
+    const pendingEval = submissions.filter((s) => {
+      const asg = courseAsgs.find((a) => a.id === s.assignmentId)
+      return asg && s.status !== 'evaluated'
+    }).length
+    return { course: c, students: studs.length, assignments: courseAsgs.length, pendingEval }
+  })
+  // Build risk rows for every student in every course taught by this faculty.
+  const seen = new Set()
+  const students = []
+  for (const c of myCourses) {
+    for (const sid of enrollments[c.id] || []) {
+      if (seen.has(sid)) continue
+      seen.add(sid)
+      students.push(buildStudentRisk(sid, c.id))
+    }
+  }
+  students.sort((a, b) => b.risk.score - a.risk.score)
+  return { courseRows, students, heatmapCourses: myCourses.map((c) => c.id) }
+}
+
+export function buildStudentRisk(studentId, primaryCourseId) {
+  const user = getUser(studentId)
+  const stats = classmateStats[studentId]
+  if (stats) {
+    const avg = attempts
+      .filter((a) => a.studentId === studentId)
+      .reduce((s, a) => {
+        const qz = getAssessment(a.assessmentId)
+        return s + (qz ? 100 * a.score / qz.questions.length : 0)
+      }, 0) / Math.max(attempts.filter((a) => a.studentId === studentId).length, 1)
+    const risk = riskProfile({
+      avgScore: avg,
+      lateStreak: stats.lateStreak,
+      weakTopicCount: stats.weakTopics.length,
+      engagementDeclining: stats.engagementDeclining,
+      pendingUrgent: stats.pendingUrgent,
+    })
+    return { student: user, course: getCourse(primaryCourseId), risk, avgScore: Math.round(avg), lateStreak: stats.lateStreak, weakTopics: stats.weakTopics.map((t) => getTopic(primaryCourseId, t)?.name || t) }
+  }
+  // Demo student: derive everything from the records.
+  const scores = quizScores(studentId, primaryCourseId)
+  const avg = scores.length ? scores.reduce((s, x) => s + x.score / x.total * 100, 0) / scores.length : 0
+  const lateStreak = computeLateStreak(studentId, primaryCourseId)
+  const mastery = topicMastery(studentId, primaryCourseId)
+  const weak = mastery.filter((m) => m.mastery != null && m.mastery < 40)
+  const hasOpen = assignments.some((a) => a.courseId === primaryCourseId && !submissions.some((s) => s.assignmentId === a.id && s.studentId === studentId) && a.due.startsWith('in '))
+  const risk = riskProfile({
+    avgScore: avg, lateStreak,
+    weakTopicCount: weak.length,
+    engagementDeclining: engagementDeclining(studentId),
+    pendingUrgent: hasOpen,
+  })
+  return { student: user, course: getCourse(primaryCourseId), risk, avgScore: Math.round(avg), lateStreak, weakTopics: weak.map((w) => w.name) }
+}
+
+// Confusion heatmap rows for one course. Shows aggregate class data only;
+// no individual identity is exposed at any point.
+export async function getConfusionHeatmap(courseId) {
+  await delay()
+  const topicList = getTopics(courseId)
+  const asgs = getAssessmentsForCourse(courseId)
+  const rows = topicList.map((t) => {
+    const cells = asgs.map((a) => {
+      let n = 0, wrong = 0
+      for (const q of a.questions) {
+        if (q.topicId !== t.id) continue
+        for (const att of attempts.filter((x) => x.assessmentId === a.id)) {
+          n += 1
+          if (att.wrong.includes(q.id)) wrong += 1
+        }
+      }
+      if (n === 0) {
+        const agg = (confusion[courseId] || {})[t.id]
+        if (agg && a.week <= 8) return { assessment: a.title, count: agg.responses, incorrectPct: agg.incorrectPct, enough: agg.responses >= 5 }
+        return { assessment: a.title, count: 0, incorrectPct: null, enough: false }
+      }
+      return { assessment: a.title, count: n, incorrectPct: Math.round(100 * wrong / n), enough: n >= 5 }
+    })
+    const counted = cells.filter((c) => c.incorrectPct != null)
+    const avg = counted.length ? Math.round(counted.reduce((s, c) => s + c.incorrectPct * c.count, 0) / counted.reduce((s, c) => s + c.count, 0)) : null
+    return { topic: t, cells, avgIncorrectPct: avg, totalResponses: counted.reduce((s, c) => s + c.count, 0) }
+  })
+  return { assessments: asgs.map((a) => a.title), rows }
+}
+
+// ---------- study plan ----------
+const PLAN_KEY = 'guni.studyplan.stu-013'
+export async function getStudyPlan() {
+  await delay()
+  const daaMastery = topicMastery('stu-013', 'cs301')
+  const weak = daaMastery.filter((m) => m.mastery != null && m.mastery < 55)
+  const saved = JSON.parse(localStorage.getItem(PLAN_KEY) || 'null')
+  const tasks = [
+    { id: 'p1', day: 'Mon', topicId: 't-301-5', type: 'lesson', title: 'Watch: Memoization, From Recursion to DP', resourceId: 'r-07', minutes: 30 },
+    { id: 'p2', day: 'Tue', topicId: 't-301-5', type: 'practice', title: 'Solve ladder problems 1 to 4', resourceId: 'r-08', minutes: 45 },
+    { id: 'p3', day: 'Wed', topicId: 't-301-3', type: 'lesson', title: 'Watch: BFS and DFS Fundamentals', resourceId: 'r-04', minutes: 25 },
+    { id: 'p4', day: 'Wed', topicId: 't-301-3', type: 'review', title: 'Redo missed Quiz 3 graph questions', resourceId: null, minutes: 30 },
+    { id: 'p5', day: 'Thu', topicId: 't-301-5', type: 'practice', title: 'Bottom-up knapsack, one variant', resourceId: 'r-08', minutes: 40 },
+    { id: 'p6', day: 'Fri', topicId: 't-301-5', type: 'review', title: 'Attempt Quiz 5 (Dynamic Programming)', resourceId: null, minutes: 20 },
+    { id: 'p7', day: 'Sat', topicId: 't-301-3', type: 'practice', title: 'Graph representation worksheet', resourceId: 'r-05', minutes: 35 },
+  ]
+  return {
+    tasks: saved || tasks,
+    baseline: tasks,
+    weakTopics: weak,
+    upcoming: [
+      { title: 'Quiz 5: Dynamic Programming', due: 'Friday', courseId: 'cs301' },
+      { title: 'Assignment 5: Dynamic Programming', due: 'in 2 days', courseId: 'cs301' },
+    ],
+  }
+}
+export async function saveStudyPlan(tasks) {
+  await delay(150)
+  localStorage.setItem(PLAN_KEY, JSON.stringify(tasks))
+}
+export async function resetStudyPlan() {
+  await delay(150)
+  localStorage.removeItem(PLAN_KEY)
+  return getStudyPlan()
+}
+
+// ---------- mutations (in-memory for the session) ----------
+const created = { courses: [], assignments: [], assessments: [], announcements: [], resources: [] }
+export async function createAssignment(data) {
+  await delay()
+  const asg = { id: uid('asg'), status: 'open', ...data }
+  assignments.push(asg)
+  created.assignments.push(asg)
+  return asg
+}
+export async function createAssessment(data) {
+  await delay()
+  const asg = { id: uid('qz'), published: true, ...data }
+  assessments.push(asg)
+  created.assessments.push(asg)
+  return asg
+}
+export async function createCourse(data) {
+  await delay()
+  const c = { id: uid('cs'), color: '#c41e24', ...data }
+  courses.push(c)
+  enrollments[c.id] = []
+  created.courses.push(c)
+  return c
+}
+export async function createAnnouncement(data) {
+  await delay()
+  const a = { id: uid('an'), date: 'Today', ...data }
+  announcements.push(a)
+  created.announcements.push(a)
+  return a
+}
+export async function uploadResource(data) {
+  await delay()
+  const r = { id: uid('r'), size: 'uploaded', week: 9, ...data }
+  resources.push(r)
+  created.resources.push(r)
+  return r
+}
+export async function saveEvaluation(assignmentId, studentId, { marks, feedback }) {
+  await delay()
+  let sub = submissions.find((s) => s.assignmentId === assignmentId && s.studentId === studentId)
+  if (sub) {
+    sub.marks = marks
+    sub.feedback = feedback
+    sub.status = 'evaluated'
+  } else {
+    sub = { id: uid('sub'), assignmentId, studentId, submittedAt: 'pending', fileName: 'not_submitted.pdf', status: 'evaluated', marks, feedback }
+    submissions.push(sub)
+  }
+  return sub
+}
+
+export function assignmentsForCourse(courseId) {
+  return assignments.filter((a) => a.courseId === courseId)
+}
+export function submissionsForAssignment(assignmentId) {
+  return submissions.filter((s) => s.assignmentId === assignmentId)
+}
+export function resourcesForCourse(courseId) {
+  return resources.filter((r) => r.courseId === courseId)
+}
+export function announcementsForCourse(courseId) {
+  return announcements.filter((a) => a.courseId === courseId)
+}
+export { courses, users, enrollments, assignments, submissions, assessments, announcements, resources, deanCourseStats, attempts, topics }

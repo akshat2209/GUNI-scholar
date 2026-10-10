@@ -1,0 +1,82 @@
+import { useState } from 'react'
+import { LogOut } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
+import { Card, Field, PageHeader, Badge } from '../components/ui'
+
+export default function Profile() {
+  const { user, logout } = useAuth()
+  const toast = useToast()
+  const navigate = useNavigate()
+  const [form, setForm] = useState({ current: '', next: '', confirm: '' })
+  const [errors, setErrors] = useState({})
+  const initials = user.name.split(' ').filter((w) => !w.endsWith('.')).map((w) => w[0]).slice(0, 2).join('')
+
+  function savePassword(e) {
+    e.preventDefault()
+    const errs = {}
+    if (form.current.length < 6) errs.current = 'Enter your current password.'
+    if (form.next.length < 8) errs.next = 'New password must be at least 8 characters.'
+    if (form.next !== form.confirm) errs.confirm = 'Passwords do not match.'
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    toast('Password updated successfully.')
+    setForm({ current: '', next: '', confirm: '' })
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="My Profile" sub="Your account details, role and access level on GUNI Scholar." />
+
+      <div className="grid grid-2">
+        <Card title="Account details">
+          <div className="flex mb-16" style={{ gap: 14 }}>
+            <span className="avatar" style={{ width: 52, height: 52, fontSize: 18 }} aria-hidden="true">{initials}</span>
+            <div>
+              <h3 style={{ fontSize: 17 }}>{user.name}</h3>
+              <Badge tone="brand" style={{ textTransform: 'capitalize' }}>{user.role}</Badge>
+            </div>
+          </div>
+          <dl style={{ display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 10, fontSize: 14 }}>
+            <dt className="muted">Email</dt><dd>{user.email}</dd>
+            <dt className="muted">Department</dt><dd>{user.dept}</dd>
+            {user.role === 'student' ? (
+              <>
+                <dt className="muted">Roll number</dt><dd>{user.rollNo}</dd>
+                <dt className="muted">Semester</dt><dd>Semester {user.sem}</dd>
+              </>
+            ) : (
+              <>
+                <dt className="muted">Staff ID</dt><dd>{user.staffId}</dd>
+              </>
+            )}
+            <dt className="muted">Account status</dt><dd><Badge tone="ok">Active</Badge></dd>
+          </dl>
+          <hr className="divider" />
+          <button className="btn btn-danger" onClick={() => { logout(); navigate('/login') }}>
+            <LogOut size={15} aria-hidden="true" /> Sign out of GUNI Scholar
+          </button>
+        </Card>
+
+        <Card title="Change password">
+          <form onSubmit={savePassword} noValidate>
+            <Field label="Current password" htmlFor="cur" error={errors.current}>
+              <input id="cur" className="input" type="password" autoComplete="current-password" value={form.current}
+                onChange={(e) => setForm({ ...form, current: e.target.value })} aria-invalid={!!errors.current} />
+            </Field>
+            <Field label="New password" htmlFor="next" error={errors.next} hint="At least 8 characters.">
+              <input id="next" className="input" type="password" autoComplete="new-password" value={form.next}
+                onChange={(e) => setForm({ ...form, next: e.target.value })} aria-invalid={!!errors.next} />
+            </Field>
+            <Field label="Confirm new password" htmlFor="conf" error={errors.confirm}>
+              <input id="conf" className="input" type="password" autoComplete="new-password" value={form.confirm}
+                onChange={(e) => setForm({ ...form, confirm: e.target.value })} aria-invalid={!!errors.confirm} />
+            </Field>
+            <button className="btn btn-primary" type="submit">Update password</button>
+          </form>
+        </Card>
+      </div>
+    </div>
+  )
+}

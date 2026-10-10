@@ -1,0 +1,125 @@
+import { useEffect, useState } from 'react'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import {
+  Activity, BarChart3, BookOpen, ClipboardList, FileQuestion, GraduationCap,
+  LayoutDashboard, LogOut, Menu, Network, ShieldCheck, UserCircle, Users, X, Flame,
+} from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+
+const Mark = ({ size = 34 }) => (
+  <svg className="mark" width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+    <circle cx="32" cy="13" r="4.5" fill="#eb2b30" />
+    <path d="M32 57 C 27.5 45 27.5 33 32 21 C 36.5 33 36.5 45 32 57 Z" fill="#eb2b30" />
+    <path d="M30.5 57 C 20 49.5 13.5 40 12.5 27 C 22.5 33.5 29 43.5 30.5 57 Z" fill="#c41e24" />
+    <path d="M33.5 57 C 44 49.5 50.5 40 51.5 27 C 41.5 33.5 35 43.5 33.5 57 Z" fill="#c41e24" />
+  </svg>
+)
+
+export const BrandLockup = () => (
+  <Link to="/" className="sidebar-brand" aria-label="GUNI Scholar home">
+    <Mark />
+    <span>
+      <span className="name">GUNI Scholar</span><br />
+      <span className="uni">Ganpat University</span>
+    </span>
+  </Link>
+)
+
+const NAV = {
+  student: [
+    { to: '/student', label: 'Dashboard', icon: LayoutDashboard, end: true },
+    { to: '/student/courses', label: 'My Courses', icon: BookOpen },
+    { to: '/student/assignments', label: 'Assignments', icon: ClipboardList },
+    { to: '/student/assessments', label: 'Assessments', icon: FileQuestion },
+    { to: '/student/analytics', label: 'My Analytics', icon: BarChart3 },
+    { to: '/student/knowledge-map', label: 'Knowledge Map', icon: Network },
+    { to: '/student/study-plan', label: 'Study Plan', icon: Activity },
+  ],
+  faculty: [
+    { to: '/faculty', label: 'Dashboard', icon: LayoutDashboard, end: true },
+    { to: '/faculty/courses', label: 'My Courses', icon: BookOpen },
+    { to: '/faculty/assignments', label: 'Assignments', icon: ClipboardList },
+    { to: '/faculty/assessments', label: 'Assessments', icon: FileQuestion },
+    { to: '/faculty/evaluation', label: 'Evaluation', icon: GraduationCap },
+    { to: '/faculty/students', label: 'Students', icon: Users },
+    { to: '/faculty/heatmap', label: 'Confusion Heatmap', icon: Flame },
+  ],
+  dean: [
+    { to: '/dean', label: 'Academic Overview', icon: BarChart3, end: true },
+  ],
+  admin: [
+    { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
+    { to: '/admin/users', label: 'Users and Roles', icon: Users },
+    { to: '/admin/courses', label: 'Courses', icon: BookOpen },
+  ],
+}
+
+export default function DashboardLayout() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => setOpen(false), [location.pathname])
+
+  const items = NAV[user.role] || []
+  const initials = user.name.split(' ').filter((w) => !w.endsWith('.')).map((w) => w[0]).slice(0, 2).join('')
+
+  return (
+    <div className="shell">
+      <a href="#main" className="skip-link">Skip to main content</a>
+
+      <nav className={`sidebar ${open ? 'open' : ''}`} aria-label="Primary">
+        <BrandLockup />
+        <div className="nav-group" role="list">
+          {items.map(({ to, label, icon: Icon, end }) => (
+            <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} aria-current="page">
+              <Icon aria-hidden="true" /> {label}
+            </NavLink>
+          ))}
+        </div>
+        <div className="nav-group">
+          <NavLink to="/profile" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <UserCircle aria-hidden="true" /> My Profile
+          </NavLink>
+        </div>
+        <div className="sidebar-footer">
+          <span className={`avatar ${user.role === 'dean' ? 'gold' : user.role === 'admin' ? 'ink' : ''}`} aria-hidden="true">{initials}</span>
+          <span className="who">
+            <span className="n">{user.name}</span><br />
+            <span className="r" style={{ textTransform: 'capitalize' }}>{user.role}</span>
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={() => { logout(); navigate('/login') }}>
+            <LogOut size={15} aria-hidden="true" /> <span className="sr-only">Sign out</span>Sign out
+          </button>
+        </div>
+      </nav>
+      {open && <button className="sidebar-overlay" aria-label="Close navigation" onClick={() => setOpen(false)} />}
+
+      <div className="main">
+        <header className="topbar">
+          <button className="btn btn-ghost btn-sm menu-btn" onClick={() => setOpen(true)} aria-expanded={open} aria-label="Open navigation">
+            <Menu size={18} aria-hidden="true" />
+          </button>
+          <span className="topbar-title">GUNI Scholar</span>
+          <span className="topbar-spacer" />
+          <div className="topbar-user">
+            <ShieldCheck size={16} aria-hidden="true" style={{ color: 'var(--ink-400)' }} />
+            <span className="small muted" style={{ textTransform: 'capitalize' }}>{user.role} access</span>
+            <span className={`avatar ${user.role === 'dean' ? 'gold' : user.role === 'admin' ? 'ink' : ''}`} aria-hidden="true">{initials}</span>
+          </div>
+        </header>
+        <main id="main" className="content" tabIndex={-1}>
+          <Outlet />
+        </main>
+        <footer className="legal-footer">
+          Ganpat University, Kherva, Mehsana, Gujarat 384012
+          <nav aria-label="Legal">
+            <Link to="/privacy">Privacy Policy</Link>
+            <Link to="/terms">Terms and Conditions</Link>
+          </nav>
+        </footer>
+      </div>
+    </div>
+  )
+}

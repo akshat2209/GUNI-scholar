@@ -1,0 +1,49 @@
+import { useEffect, useState } from 'react'
+import { Card, Loading, PageHeader } from '../../components/ui'
+import Heatmap from '../../components/Heatmap'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+export default function FacultyHeatmap() {
+  const { user } = useAuth()
+  const courses = api.facultyCourses(user.id)
+  const [courseId, setCourseId] = useState(courses[0]?.id || '')
+  const [data, setData] = useState(null)
+
+  useEffect(() => {
+    setData(null)
+    api.getConfusionHeatmap(courseId).then(setData)
+  }, [courseId])
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Anonymous Class Confusion Heatmap"
+        sub="Where the class collectively answers wrong, by topic and assessment. Built only from evaluated responses; no student identity is ever shown."
+      />
+
+      <div className="filter-bar">
+        <div className="field">
+          <label htmlFor="hcourse">Course</label>
+          <select id="hcourse" className="select" value={courseId} onChange={(e) => setCourseId(e.target.value)}>
+            {courses.map((c) => <option key={c.id} value={c.id}>{c.code} {c.short}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {!data ? <Loading label="Aggregating class responses" /> : (
+        <Card title={`${api.getCourse(courseId).code} confusion by topic`} sub="Rows are topics, columns are assessments. Darker cells mean a larger share of the class answered incorrectly.">
+          <Heatmap assessments={data.assessments} rows={data.rows} />
+        </Card>
+      )}
+
+      <Card title="How to act on this">
+        <ul style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14.5 }}>
+          <li>Topics above 60 percent incorrect need a re-teach before the next assessment builds on them.</li>
+          <li>Topics between 40 and 60 percent are revision candidates; assign the matching practice resources.</li>
+          <li>Cells with fewer than five evaluated responses are marked low-sample and deliberately excluded from comparison so one or two students cannot skew the picture.</li>
+        </ul>
+      </Card>
+    </div>
+  )
+}

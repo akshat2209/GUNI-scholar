@@ -1,0 +1,83 @@
+import { useState } from 'react'
+import { Badge, Card, Field, PageHeader } from '../../components/ui'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+export default function AdminUsers() {
+  const toast = useToast()
+  const [query, setQuery] = useState('')
+  const [role, setRole] = useState('all')
+  const [tick, setTick] = useState(0)
+
+  const rows = api.users.filter((u) =>
+    (role === 'all' || u.role === role) &&
+    (u.name.toLowerCase().includes(query.toLowerCase()) || u.email.toLowerCase().includes(query.toLowerCase()) || (u.rollNo || '').toLowerCase().includes(query.toLowerCase())),
+  )
+
+  function setStatus(user, status) {
+    user.status = status
+    setTick(tick + 1)
+    toast(status === 'active' ? `${user.name} reactivated.` : `${user.name} suspended. They can no longer sign in.`)
+  }
+  function changeRole(user, newRole) {
+    user.role = newRole
+    setTick(tick + 1)
+    toast(`${user.name} now has ${newRole} access. Their navigation and permissions update on next sign in.`)
+  }
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Users and Roles"
+        sub="Manage student and faculty accounts, adjust roles and suspend or reactivate access. Role changes take effect at the next sign in."
+      />
+
+      <div className="filter-bar">
+        <div className="field" style={{ flex: 1, maxWidth: 320 }}>
+          <label htmlFor="uq">Search</label>
+          <input id="uq" className="input" placeholder="Name, email or roll number" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="urole">Role</label>
+          <select id="urole" className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="all">All roles</option>
+            <option value="student">Students</option>
+            <option value="faculty">Faculty</option>
+            <option value="dean">Dean</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="data">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {rows.map((u) => (
+              <tr key={u.id}>
+                <td style={{ fontWeight: 600 }}>{u.name}{u.rollNo && <span className="muted small"> {u.rollNo}</span>}</td>
+                <td>{u.email}</td>
+                <td>
+                  <select className="select" style={{ minWidth: 110, minHeight: 32 }} value={u.role} aria-label={`Role for ${u.name}`}
+                    onChange={(e) => changeRole(u, e.target.value)}>
+                    <option value="student">student</option>
+                    <option value="faculty">faculty</option>
+                    <option value="dean">dean</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </td>
+                <td><Badge tone={u.status === 'active' ? 'ok' : 'bad'}>{u.status}</Badge></td>
+                <td>
+                  {u.status === 'active'
+                    ? <button className="btn btn-secondary btn-sm" onClick={() => setStatus(u, 'suspended')}>Suspend</button>
+                    : <button className="btn btn-secondary btn-sm" onClick={() => setStatus(u, 'active')}>Reactivate</button>}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={5}><EmptyState title="No accounts match">Adjust the search or role filter.</EmptyState></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}

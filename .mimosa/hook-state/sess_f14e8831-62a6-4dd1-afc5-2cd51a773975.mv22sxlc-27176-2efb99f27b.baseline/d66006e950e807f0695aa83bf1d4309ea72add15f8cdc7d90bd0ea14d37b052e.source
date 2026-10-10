@@ -1,0 +1,142 @@
+import { useState } from 'react'
+import { Card, EmptyState, Field, PageHeader, Badge } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+function QuestionEditor({ questions, setQuestions, topics, courseId }) {
+  const [q, setQ] = useState({ text: '', options: ['', '', '', ''], correct: 0, topicId: '' })
+  const [errors, setErrors] = useState({})
+
+  function add() {
+    const errs = {}
+    if (q.text.trim().length < 10) errs.text = 'Write the question in at least 10 characters.'
+    if (q.options.some((o) => !o.trim())) errs.options = 'Fill in all four options.'
+    if (!q.topicId) errs.topicId = 'Tag the question with a topic.'
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    setQuestions([...questions, { ...q, id: 'q' + (questions.length + 1), text: q.text.trim(), options: q.options.map((o) => o.trim()) }])
+    setQ({ text: '', options: ['', '', '', ''], correct: 0, topicId: '' })
+  }
+
+  return (
+    <Card title={`Add questions (${questions.length} added)`} sub="Every question must be tagged with a topic. That tag is what powers topic-wise analytics and the confusion heatmap.">
+      <Field label="Question text" htmlFor="qtext" error={errors.text}>
+        <textarea id="qtext" className="textarea" style={{ minHeight: 70 }} value={q.text} onChange={(e) => setQ({ ...q, text: e.target.value })} aria-invalid={!!errors.text} placeholder="What is the worst case complexity of quicksort?" />
+      </Field>
+      {q.options.map((o, i) => (
+        <Field key={i} label={`Option ${i + 1}${q.correct === i ? ' (correct answer)' : ''}`} htmlFor={`opt${i}`} error={errors.options}>
+          <div className="flex">
+            <input type="radio" name="correctOption" checked={q.correct === i} onChange={() => setQ({ ...q, correct: i })} aria-label={`Mark option ${i + 1} as correct`} />
+            <input id={`opt${i}`} className="input" value={o} onChange={(e) => { const next = [...q.options]; next[i] = e.target.value; setQ({ ...q, options: next }) }} />
+          </div>
+        </Field>
+      ))}
+      <Field label="Topic" htmlFor="qtopic" error={errors.topicId}>
+        <select id="qtopic" className="select" value={q.topicId} onChange={(e) => setQ({ ...q, topicId: e.target.value })} aria-invalid={!!errors.topicId}>
+          <option value="">Select topic</option>
+          {topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </Field>
+      <button type="button" className="btn btn-secondary" onClick={add} disabled={!courseId}>Add question</button>
+      {!courseId && <p className="field-hint mt-8">Pick a course first.</p>}
+
+      {questions.length > 0 && (
+        <ul style={{ listStyle: 'none', marginTop: 18 }}>
+          {questions.map((x, i) => (
+            <li key={x.id} className="flex-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <span className="small" style={{ flex: 1 }}>
+                <strong>Q{i + 1}.</strong> {x.text}
+                <span className="muted"> ({api.getTopic(courseId, x.topicId)?.name || 'untagged'})</span>
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setQuestions(questions.filter((_, j) => j !== i))} aria-label={`Remove question ${i + 1}`}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+export default function FacultyAssessments() {
+  const { user } = useAuth()
+  const toast = useToast()
+  const myCourses = api.facultyCourses(user.id)
+  const [form, setForm] = useState({ courseId: '', title: '', week: 9 })
+  const [questions, setQuestions] = useState([])
+  const [errors, setErrors] = useState({})
+
+  const rows = api.assessments.filter((a) => myCourses.some((c) => c.id === a.courseId))
+  const topics = form.courseId ? api.getTopics(form.courseId) : []
+
+  async function publish(e) {
+    e.preventDefault()
+    const errs = {}
+    if (!form.courseId) errs.courseId = 'Pick the course.'
+    if (form.title.trim().length < 6) errs.title = 'Give the quiz a descriptive title.'
+    if (questions.length < 3) errs.questions = 'A quiz needs at least 3 questions.'
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    await api.createAssessment({ ...form, title: form.title.trim(), published: true, questions })
+    toast(`Quiz published with ${questions.length} questions. Students see it in their assessments now.`)
+    setForm({ courseId: '', title: '', week: 9 })
+    setQuestions([])
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Assessments" sub="Build quizzes, tag questions with topics and publish. Published quizzes feed topic mastery and the class confusion heatmap." />
+
+      <div className="grid grid-2" style={{ alignItems: 'start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="Quiz details">
+            <form onSubmit={publish} noValidate>
+              <Field label="Course" htmlFor="zcourse" error={errors.courseId}>
+                <select id="zcourse" className="select" value={form.courseId} onChange={(e) => setForm({ ...form, courseId: e.target.value })} aria-invalid={!!errors.courseId}>
+                  <option value="">Select course</option>
+                  {myCourses.map((c) => <option key={c.id} value={c.id}>{c.code} {c.short}</option>)}
+                </select>
+              </Field>
+              <div className="form-row">
+                <Field label="Title" htmlFor="ztitle" error={errors.title}>
+                  <input id="ztitle" className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} aria-invalid={!!errors.title} placeholder="Quiz 6: Backtracking" />
+                </Field>
+                <Field label="Week" htmlFor="zweek">
+                  <input id="zweek" className="input" type="number" min="1" max="16" value={form.week} onChange={(e) => setForm({ ...form, week: Number(e.target.value) })} />
+                </Field>
+              </div>
+              {errors.questions && <p className="field-error" role="alert">{errors.questions}</p>}
+              <button className="btn btn-primary mt-16" type="submit">Publish quiz</button>
+            </form>
+          </Card>
+          <QuestionEditor questions={questions} setQuestions={setQuestions} topics={topics} courseId={form.courseId} />
+        </div>
+
+        <Card title="Published quizzes" tight>
+          {rows.length === 0 ? (
+            <EmptyState title="No quizzes yet">Publish your first quiz with the builder.</EmptyState>
+          ) : (
+            <div className="table-wrap" style={{ border: 'none', boxShadow: 'none' }}>
+              <table className="data" style={{ minWidth: 460 }}>
+                <thead><tr><th>Title</th><th>Course</th><th className="num">Questions</th><th>Status</th></tr></thead>
+                <tbody>
+                  {rows.map((a) => (
+                    <tr key={a.id}>
+                      <td style={{ fontWeight: 600 }}>{a.title}</td>
+                      <td>{api.getCourse(a.courseId).short}</td>
+                      <td className="num">{a.questions.length}</td>
+                      <td><Badge tone={a.published ? 'ok' : 'neutral'}>{a.published ? 'Published' : 'Draft'}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="small muted card-body-tight">
+            Topic tags on questions decide where results land in the heatmap and in per-topic mastery. Keep them accurate.
+          </p>
+        </Card>
+      </div>
+    </div>
+  )
+}

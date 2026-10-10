@@ -1,0 +1,110 @@
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { AlertTriangle } from 'lucide-react'
+import { Badge, Card, EmptyState, Loading, MasteryRow, PageHeader, riskTone } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+function StudentDetail({ studentId }) {
+  const { user } = useAuth()
+  const courses = api.facultyCourses(user.id)
+  const [rows, setRows] = useState(null)
+
+  useEffect(() => {
+    setRows(null)
+    // Full risk profile for the student in each course this faculty teaches.
+    Promise.all(courses
+      .filter((c) => (api.enrollments[c.id] || []).includes(studentId))
+      .map(async (c) => ({
+        course: c,
+        analytics: await api.getStudentCourseAnalytics(studentId, c.id),
+      })),
+    ).then(setRows)
+  }, [studentId, courses])
+
+  if (!rows) return <Loading label="Loading student profile" />
+  const student = api.getUser(studentId)
+  if (!student) return <EmptyState title="Student not found" />
+
+  return (
+    <div className="page">
+      <PageHeader
+        title={student.name}
+        sub={`${student.rollNo} &middot; ${student.dept}, semester ${student.sem} &middot; ${student.email}`}
+        actions={<Link to="/faculty/students" className="btn btn-secondary btn-sm">All students</Link>}
+      />
+      {rows.map(({ course, analytics }) => (
+        <Card key={course.id} title={`${course.code} ${course.title}`} actions={<Badge tone={riskTone(analytics.risk.band)}>Risk {analytics.risk.score}/100, {analytics.risk.band}</Badge>}>
+          <div className="grid grid-2">
+            <div>
+              <h3 className="mb-8">Explainable risk indicators</h3>
+              <ul className="risk-list">
+                {analytics.risk.indicators.map((i) => (
+                  <li key={i.label}><AlertTriangle size={16} color="var(--warn-text)" aria-hidden="true" />
+                    <span><strong>{i.label} (+{i.points} pts).</strong> {i.evidence}</span>
+                  </li>
+                ))}
+                {analytics.risk.indicators.length === 0 && <li>No active indicators in this course.</li>}
+              </ul>
+              <h3 className="mt-24 mb-8">Suggested intervention</h3>
+              <p className="small muted">
+                {analytics.risk.band === 'High'
+                  ? 'Schedule a one-on-one tutoring session this week. Recommend the micro-modules below and check the next quiz before the mid term.'
+                  : analytics.risk.band === 'Medium'
+                    ? 'Share the topic resources below and ask the student to attempt the practice set before the next assessment.'
+                    : 'No intervention needed. Keep monitoring through regular quiz analytics.'}
+              </p>
+            </div>
+            <div>
+              <h3 className="mb-8">Topic mastery</h3>
+              {analytics.mastery.map((m) => <MasteryRow key={m.id} name={m.name} value={m.mastery} />)}
+              <h3 className="mt-16 mb-8">Recent scores</h3>
+              <p className="small muted">
+                {analytics.scores.map((s) => `${s.title.replace(/Quiz \d+: /, '')}: ${s.score}/${s.total}`).join(' | ')}
+              </p>
+            </div>
+          </div>
+        </Card>
+      ))}
+      {rows.length === 0 && <EmptyState title="Not enrolled in your courses">This student is not enrolled in any course you teach.</EmptyState>}
+    </div>
+  )
+}
+
+export default function FacultyStudents() {
+  const { user } = useAuth()
+  const { studentId } = useParams()
+  const [data, setData] = useState(null)
+
+  useEffect(() => { api.getFacultyDashboard(user.id).then(setData) }, [user.id])
+  if (studentId) return <StudentDetail studentId={studentId} />
+  if (!data) return <Loading label="Loading students" />
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Students"
+        sub="Everyone enrolled in your courses with their explainable risk band. Sort by risk to prioritise support."
+      />
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr><th>Student</th><th>Course</th><th className="num">Average</th><th className="num">Late streak</th><th>Weak topics</th><th>Risk</th></tr>
+          </thead>
+          <tbody>
+            {[...data.students].sort((a, b) => b.risk.score - a.risk.score).map((r) => (
+              <tr key={r.student.id}>
+                <td><Link to={`/faculty/students/${r.student.id}`} style={{ fontWeight: 600 }}>{r.student.name}</Link></td>
+                <td>{r.course.short}</td>
+                <td className="num">{r.avgScore}%</td>
+                <td className="num">{r.lateStreak}</td>
+                <td>{r.weakTopics.length ? r.weakTopics.join(', ') : 'None'}</td>
+                <td><Badge tone={riskTone(r.risk.band)}>{r.risk.band}, {r.risk.score}/100</Badge></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}

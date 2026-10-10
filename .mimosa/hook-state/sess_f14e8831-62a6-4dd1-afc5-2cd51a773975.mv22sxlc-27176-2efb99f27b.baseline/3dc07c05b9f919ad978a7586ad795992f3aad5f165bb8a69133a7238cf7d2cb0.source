@@ -1,0 +1,106 @@
+import { useEffect, useState } from 'react'
+import { Badge, Card, EmptyState, Loading, PageHeader } from '../../components/ui'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+export default function StudyPlan() {
+  const toast = useToast()
+  const [plan, setPlan] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { api.getStudyPlan().then(setPlan) }, [])
+
+  if (!plan) return <Loading label="Generating your study plan" />
+
+  const done = plan.tasks.filter((t) => t.done).length
+  const pct = Math.round(100 * done / plan.tasks.length)
+
+  async function toggle(taskId) {
+    const next = plan.tasks.map((t) => (t.id === taskId ? { ...t, done: !t.done } : t))
+    setPlan({ ...plan, tasks: next })
+    await api.saveStudyPlan(next)
+    const t = next.find((x) => x.id === taskId)
+    if (t.done) toast('Task marked complete. Progress updated.')
+  }
+
+  async function regenerate() {
+    setBusy(true)
+    const fresh = await api.resetStudyPlan()
+    setPlan(fresh)
+    setBusy(false)
+    toast('A fresh plan has been generated from your current weak topics.')
+  }
+
+  const days = [...new Set(plan.tasks.map((t) => t.day))]
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Smart Study Plan"
+        sub="Generated from your weakest topics and the resources published for them. Tasks respect upcoming assessment deadlines."
+        actions={<button className="btn btn-secondary" onClick={regenerate} disabled={busy}>{busy ? 'Regenerating...' : 'Regenerate plan'}</button>}
+      />
+
+      <div className="grid grid-3">
+        <Card title="Plan progress">
+          <div className="flex-between mb-8">
+            <span className="small muted">{done} of {plan.tasks.length} tasks done</span>
+            <span style={{ fontWeight: 800, fontSize: 22, fontVariantNumeric: 'tabular-nums' }}>{pct}%</span>
+          </div>
+          <div className={`progress ${pct === 100 ? 'ok' : ''}`} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Study plan completion">
+            <span style={{ width: `${pct}%` }} />
+          </div>
+          <p className="small muted mt-16">Complete lessons before practice tasks for the same topic. The order follows your knowledge map.</p>
+        </Card>
+
+        <Card title="Focus topics" sub="Derived from mastery below 55 percent.">
+          {plan.weakTopics.length === 0 ? (
+            <EmptyState title="Nothing to fix">All topics are above the threshold.</EmptyState>
+          ) : plan.weakTopics.map((t) => (
+            <div key={t.id} className="flex-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</span>
+              <Badge tone={t.mastery < 40 ? 'bad' : 'warn'}>{t.mastery}%</Badge>
+            </div>
+          ))}
+        </Card>
+
+        <Card title="Upcoming deadlines" sub="Assessments the plan is steering you toward.">
+          {plan.upcoming.map((u) => (
+            <div key={u.title} className="flex-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{u.title}</span>
+              <Badge tone="warn">{u.due}</Badge>
+            </div>
+          ))}
+        </Card>
+      </div>
+
+      <Card title="This week's plan" sub="Mark tasks done as you go. Progress is saved on this device.">
+        {plan.tasks.length === 0 ? (
+          <EmptyState title="No tasks">Generate a plan to fill your week.</EmptyState>
+        ) : (
+          <div className="grid grid-2" style={{ gap: '4px 32px' }}>
+            {days.map((d) => (
+              <div key={d}>
+                <h3 className="mb-8" style={{ borderBottom: '2px solid var(--red-500)', display: 'inline-block', paddingBottom: 2 }}>{dayName(d)}</h3>
+                {plan.tasks.filter((t) => t.day === d).map((t) => (
+                  <label key={t.id} className={`task-row ${t.done ? 'done' : ''}`}>
+                    <input type="checkbox" checked={t.done} onChange={() => toggle(t.id)} aria-label={`Mark ${t.title} as done`} />
+                    <span style={{ flex: 1 }}>
+                      <span className="task-title" style={{ display: 'block', fontWeight: 600, fontSize: 14 }}>{t.title}</span>
+                      <span className="small muted">{t.type} &middot; about {t.minutes} min</span>
+                    </span>
+                    <Badge tone={t.type === 'lesson' ? 'info' : t.type === 'practice' ? 'brand' : 'neutral'}>{t.type}</Badge>
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+function dayName(d) {
+  return { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' }[d] || d
+}

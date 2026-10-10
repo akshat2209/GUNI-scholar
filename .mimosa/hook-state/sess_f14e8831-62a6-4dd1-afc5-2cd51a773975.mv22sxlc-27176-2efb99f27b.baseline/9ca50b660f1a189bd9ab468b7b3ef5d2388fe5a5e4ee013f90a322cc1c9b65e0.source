@@ -1,0 +1,177 @@
+import { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { Card, EmptyState, Field, Loading, PageHeader, Badge, Crumb } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+function CreateCourse({ onDone }) {
+  const toast = useToast()
+  const [form, setForm] = useState({ code: '', title: '', credits: 3, sem: 5 })
+  const [errors, setErrors] = useState({})
+
+  async function submit(e) {
+    e.preventDefault()
+    const errs = {}
+    if (!/^[A-Z0-9]{5,8}$/.test(form.code)) errs.code = 'Course code must be 5 to 8 capital letters or digits, for example 20CS310.'
+    if (form.title.trim().length < 6) errs.title = 'Give the course a descriptive title.'
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    await api.createCourse({ ...form, title: form.title.trim(), dept: 'B.Tech CSE', facultyId: 'fac-01' })
+    toast(`Course ${form.code} created and assigned to you.`)
+    setForm({ code: '', title: '', credits: 3, sem: 5 })
+    onDone()
+  }
+
+  return (
+    <Card title="Create a new course">
+      <form onSubmit={submit} noValidate>
+        <div className="form-row">
+          <Field label="Course code" htmlFor="ccode" error={errors.code}>
+            <input id="ccode" className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} aria-invalid={!!errors.code} placeholder="20CS310" />
+          </Field>
+          <Field label="Credits" htmlFor="ccredits">
+            <select id="ccredits" className="select" value={form.credits} onChange={(e) => setForm({ ...form, credits: Number(e.target.value) })}>
+              {[2, 3, 4].map((n) => <option key={n}>{n}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Course title" htmlFor="ctitle" error={errors.title}>
+          <input id="ctitle" className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} aria-invalid={!!errors.title} placeholder="Compiler Design" />
+        </Field>
+        <button className="btn btn-primary">Create course</button>
+      </form>
+    </Card>
+  )
+}
+
+function CourseManage({ courseId }) {
+  const course = api.getCourse(courseId)
+  const toast = useToast()
+  const [res, setRes] = useState({ title: '', topicId: '', type: 'notes' })
+  const [resError, setResError] = useState('')
+  const [ann, setAnn] = useState({ title: '', body: '' })
+  const [annErrors, setAnnErrors] = useState({})
+  if (!course) return <EmptyState title="Course not found" />
+  const topics = api.getTopics(courseId)
+  const materials = api.resourcesForCourse(courseId)
+
+  async function upload(e) {
+    e.preventDefault()
+    if (!res.title.trim()) { setResError('Give the resource a title.'); return }
+    if (!res.topicId) { setResError('Pick the topic this resource belongs to.'); return }
+    await api.uploadResource({ ...res, courseId, title: res.title.trim() })
+    toast('Resource published to the course.')
+    setRes({ title: '', topicId: '', type: 'notes' })
+    setResError('')
+  }
+  async function postAnnouncement(e) {
+    e.preventDefault()
+    const errs = {}
+    if (ann.title.trim().length < 5) errs.title = 'Title must be at least 5 characters.'
+    if (ann.body.trim().length < 12) errs.body = 'Write at least a sentence so students know what changed.'
+    setAnnErrors(errs)
+    if (Object.keys(errs).length) return
+    await api.createAnnouncement({ ...ann, courseId, authorId: 'fac-01' })
+    toast('Announcement posted to the course.')
+    setAnn({ title: '', body: '' })
+  }
+
+  return (
+    <div className="page">
+      <Crumb to="/faculty/courses">Back to my courses</Crumb>
+      <PageHeader title={course.title} sub={`${course.code} &middot; ${course.credits} credits &middot; ${api.courseStudents(courseId).length} students enrolled`} />
+      <div className="grid grid-2">
+        <Card title="Publish a learning resource" sub="Resources appear for students instantly, filterable by topic.">
+          <form onSubmit={upload} noValidate>
+            <Field label="Resource title" htmlFor="rtitle" error={resError}>
+              <input id="rtitle" className="input" value={res.title} onChange={(e) => { setRes({ ...res, title: e.target.value }); setResError('') }} aria-invalid={!!resError} placeholder="Lecture notes week 9" />
+            </Field>
+            <div className="form-row">
+              <Field label="Topic" htmlFor="rtopic" error={resError && !res.topicId ? resError : ''}>
+                <select id="rtopic" className="select" value={res.topicId} onChange={(e) => setRes({ ...res, topicId: e.target.value })}>
+                  <option value="">Select topic</option>
+                  {topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Type" htmlFor="rtype">
+                <select id="rtype" className="select" value={res.type} onChange={(e) => setRes({ ...res, type: e.target.value })}>
+                  <option value="notes">Notes</option>
+                  <option value="slides">Slides</option>
+                  <option value="video">Video</option>
+                  <option value="practice">Practice set</option>
+                </select>
+              </Field>
+            </div>
+            <button className="btn btn-primary">Publish resource</button>
+          </form>
+        </Card>
+
+        <Card title="Post an announcement" sub="Students see this on the course page and their dashboard.">
+          <form onSubmit={postAnnouncement} noValidate>
+            <Field label="Title" htmlFor="atitle" error={annErrors.title}>
+              <input id="atitle" className="input" value={ann.title} onChange={(e) => setAnn({ ...ann, title: e.target.value })} aria-invalid={!!annErrors.title} />
+            </Field>
+            <Field label="Message" htmlFor="abody" error={annErrors.body}>
+              <textarea id="abody" className="textarea" value={ann.body} onChange={(e) => setAnn({ ...ann, body: e.target.value })} aria-invalid={!!annErrors.body} />
+            </Field>
+            <button className="btn btn-primary">Post announcement</button>
+          </form>
+        </Card>
+      </div>
+
+      <Card title="Published material" tight>
+        {materials.length === 0 ? (
+          <EmptyState title="Nothing published yet">Upload the first resource for this course.</EmptyState>
+        ) : (
+          <div className="table-wrap" style={{ border: 'none', boxShadow: 'none' }}>
+            <table className="data" style={{ minWidth: 520 }}>
+              <thead><tr><th>Title</th><th>Topic</th><th>Type</th><th>Week</th></tr></thead>
+              <tbody>
+                {materials.map((r) => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 600 }}>{r.title}</td>
+                    <td>{api.getTopic(courseId, r.topicId)?.name || 'General'}</td>
+                    <td>{r.type}</td>
+                    <td>{r.week}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+export default function FacultyCourses() {
+  const { user } = useAuth()
+  const { courseId } = useParams()
+  const [tick, setTick] = useState(0)
+  const myCourses = api.facultyCourses(user.id)
+
+  if (courseId) return <CourseManage courseId={courseId} />
+
+  return (
+    <div className="page">
+      <PageHeader title="My Courses" sub="Courses you teach. Open one to publish resources and announcements." />
+      {myCourses.length === 0 ? <Loading label="Loading courses" /> : (
+        <div className="grid grid-3">
+          {myCourses.map((c) => (
+            <article key={c.id + tick} className="card card-pad">
+              <div className="flex-between">
+                <span className="badge badge-brand">{c.code}</span>
+                <Badge tone="neutral">{api.courseStudents(c.id).length} students</Badge>
+              </div>
+              <h3 className="mt-8" style={{ fontSize: 16 }}>{c.title}</h3>
+              <p className="small muted mt-8">{c.credits} credits, semester {c.sem}</p>
+              <Link className="btn btn-secondary btn-sm mt-16" to={`/faculty/courses/${c.id}`}>Manage course</Link>
+            </article>
+          ))}
+        </div>
+      )}
+      <CreateCourse onDone={() => setTick(tick + 1)} />
+    </div>
+  )
+}

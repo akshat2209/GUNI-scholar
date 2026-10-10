@@ -1,0 +1,198 @@
+import { useMemo, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { Card, EmptyState, Field, Loading, PageHeader, Badge, Crumb, ScoreBadge, MasteryRow } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+function AttemptQuiz({ assessment, onDone }) {
+  const qs = assessment.questions
+  const [idx, setIdx] = useState(0)
+  const [answers, setAnswers] = useState({})
+  const [error, setError] = useState('')
+  const q = qs[idx]
+
+  function pick(opt) {
+    setAnswers((a) => ({ ...a, [q.id]: opt }))
+    setError('')
+  }
+  function submit() {
+    if (Object.keys(answers).length < qs.length) {
+      setError(`Answer all questions before submitting. ${qs.length - Object.keys(answers).length} left.`)
+      return
+    }
+    const wrong = qs.filter((x) => answers[x.id] !== x.correct).map((x) => x.id)
+    onDone({ wrong, score: qs.length - wrong.length })
+  }
+
+  return (
+    <div className="page">
+      <Crumb to="/student/assessments">Back to assessments</Crumb>
+      <PageHeader title={assessment.title} sub={`Question ${idx + 1} of ${qs.length}. Answer every question, then submit for evaluation.`} />
+      <div className="grid" style={{ gridTemplateColumns: '2fr 1fr', alignItems: 'start' }}>
+        <Card>
+          <p style={{ fontSize: 15.5, fontWeight: 600 }}>{q.text}</p>
+          <div role="radiogroup" aria-label={`Options for question ${idx + 1}`} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
+            {q.options.map((opt, i) => (
+              <label key={i} className={`option-row ${answers[q.id] === i ? 'selected' : ''}`}>
+                <input type="radio" name={`q-${q.id}`} checked={answers[q.id] === i} onChange={() => pick(i)} />
+                <span>{opt}</span>
+              </label>
+            ))}
+          </div>
+          {error && <p className="field-error mt-8" role="alert">{error}</p>}
+          <div className="flex mt-24" style={{ justifyContent: 'space-between' }}>
+            <button className="btn btn-secondary" disabled={idx === 0} onClick={() => setIdx(idx - 1)}>Previous</button>
+            {idx < qs.length - 1
+              ? <button className="btn btn-primary" onClick={() => setIdx(idx + 1)}>Next question</button>
+              : <button className="btn btn-primary" onClick={submit}>Submit quiz</button>}
+          </div>
+        </Card>
+
+        <Card title="Question palette">
+          <p className="small muted mb-16">Green numbers are answered. Use the palette to jump between questions.</p>
+          <div className="q-palette">
+            {qs.map((x, i) => (
+              <button key={x.id} className={`${answers[x.id] != null ? 'answered' : ''} ${i === idx ? 'current' : ''}`}
+                onClick={() => setIdx(i)} aria-label={`Go to question ${i + 1}${answers[x.id] != null ? ', answered' : ''}`}>
+                {i + 1}
+              </button>
+            ))}
+          </div>
+          <button className="btn btn-primary btn-block mt-24" onClick={submit}>Submit quiz</button>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function Results({ assessment, result }) {
+  const qs = assessment.questions
+  const course = api.getCourse(assessment.courseId)
+  const topicRows = useMemo(() => {
+    return api.getTopics(assessment.courseId).map((t) => {
+      const mine = qs.filter((q) => q.topicId === t.id)
+      if (!mine.length) return { ...t, mastery: null }
+      const wrong = mine.filter((q) => result.wrong.includes(q.id)).length
+      return { ...t, mastery: Math.round(100 * (mine.length - wrong) / mine.length) }
+    }).filter((r) => r.mastery != null)
+  }, [assessment, result, qs])
+
+  return (
+    <div className="page">
+      <Crumb to="/student/assessments">Back to assessments</Crumb>
+      <PageHeader title={`Results: ${assessment.title}`} sub={`${course.code} ${course.short}. Review each answer and the faculty explanation below.`}
+        actions={<ScoreBadge score={result.score} total={qs.length} />} />
+
+      <div className="grid grid-2">
+        <Card title="Topic-wise performance in this quiz">
+          {topicRows.map((r) => <MasteryRow key={r.id} name={r.name} value={r.mastery} />)}
+          <p className="small muted mt-16">Weak topics from this quiz feed directly into your mastery map and study plan.</p>
+          <Link className="btn btn-secondary btn-sm mt-16" to={`/student/analytics/${assessment.courseId}`}>Open full analytics</Link>
+        </Card>
+
+        <Card title="Review your answers">
+          <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {qs.map((q, i) => {
+              const given = result.answers?.[q.id]
+              const wrong = result.wrong.includes(q.id)
+              return (
+                <li key={q.id} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+                  <div className="flex-between">
+                    <span className="small" style={{ fontWeight: 600 }}>Q{i + 1}. {q.text}</span>
+                    <Badge tone={wrong ? 'bad' : 'ok'}>{wrong ? 'Incorrect' : 'Correct'}</Badge>
+                  </div>
+                  <p className="small muted mt-8">
+                    Your answer: {given != null ? q.options[given] : 'Not answered'}.
+                    {wrong && <> Correct answer: <strong>{q.options[q.correct]}</strong>.</>}
+                  </p>
+                  {wrong && <p className="small mt-8" style={{ color: 'var(--ink-700)' }}><strong>Explanation:</strong> {q.explanation}</p>}
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function QuizDetail({ assessmentId }) {
+  const { user } = useAuth()
+  const toast = useToast()
+  const [result, setResult] = useState(null)
+  const assessment = api.getAssessment(assessmentId)
+  if (!assessment) return <EmptyState title="Assessment not found" />
+  const course = api.getCourse(assessment.courseId)
+  const attempt = api.getAttempt(assessmentId, user.id)
+
+  function finish(res) {
+    api._recordAttempt(assessment.id, user.id, res)
+    toast(`Quiz submitted. Score: ${res.score}/${assessment.questions.length}.`)
+    setResult(res)
+  }
+
+  if (result) return <Results assessment={assessment} result={result} />
+  if (attempt) return <Results assessment={assessment} result={{ wrong: attempt.wrong, score: attempt.score, answers: {} }} />
+
+  if (!assessment.published) {
+    return (
+      <div className="page">
+        <Crumb to="/student/assessments">Back to assessments</Crumb>
+        <Card title={assessment.title}>
+          <EmptyState title="Not open yet">
+            This quiz is scheduled but has not been published by the faculty. You will see it in your list once it opens.
+          </EmptyState>
+        </Card>
+      </div>
+    )
+  }
+  return <AttemptQuiz key={assessment.id} assessment={assessment} onDone={finish} />
+}
+
+export default function StudentAssessments() {
+  const { user } = useAuth()
+  const { assessmentId } = useParams()
+  const myCourses = api.studentCourses(user.id)
+  const rows = api.assessments.filter((a) => myCourses.some((c) => c.id === a.courseId))
+
+  if (assessmentId) return <QuizDetail assessmentId={assessmentId} />
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Assessments and Quizzes"
+        sub="Attempt published quizzes, then review scores, topic-wise performance and faculty explanations."
+      />
+      {rows.length === 0 ? (
+        <Card><EmptyState title="No assessments yet">Published quizzes will appear here.</EmptyState></Card>
+      ) : (
+        <div className="table-wrap">
+          <table className="data">
+            <thead><tr><th>Assessment</th><th>Course</th><th>Week</th><th>Questions</th><th>Status</th><th className="num">Score</th></tr></thead>
+            <tbody>
+              {rows.map((a) => {
+                const course = api.getCourse(a.courseId)
+                const att = api.getAttempt(a.id, user.id)
+                return (
+                  <tr key={a.id}>
+                    <td><Link to={`/student/assessments/${a.id}`} style={{ fontWeight: 600 }}>{a.title}</Link></td>
+                    <td>{course.short}</td>
+                    <td>{a.week}</td>
+                    <td>{a.questions.length}</td>
+                    <td>
+                      {!a.published ? <Badge tone="neutral">Scheduled</Badge>
+                        : att ? <Badge tone="ok">Attempted</Badge>
+                        : <Badge tone="warn">Open</Badge>}
+                    </td>
+                    <td className="num">{att ? `${att.score}/${a.questions.length}` : 'Not attempted'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}

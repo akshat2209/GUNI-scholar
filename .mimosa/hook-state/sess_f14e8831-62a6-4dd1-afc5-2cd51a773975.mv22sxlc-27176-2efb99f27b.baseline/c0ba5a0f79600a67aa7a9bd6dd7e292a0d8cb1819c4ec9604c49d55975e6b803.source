@@ -1,0 +1,115 @@
+import { useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { CheckCircle2, Lock, Mail } from 'lucide-react'
+import { useAuth, roleHome } from '../context/AuthContext'
+import { Field } from '../components/ui'
+import { demoPassword } from '../data/mock'
+
+const DEMO = [
+  { role: 'Student', email: 'aarav.shah@ganpatuni.ac.in' },
+  { role: 'Faculty', email: 'nirav.bhatt@ganpatuni.ac.in' },
+  { role: 'Dean', email: 'kalpesh.patel@ganpatuni.ac.in' },
+  { role: 'Admin', email: 'sneha.kulkarni@ganpatuni.ac.in' },
+]
+
+export default function Login() {
+  const { login } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [email, setEmail] = useState('')
+  const [pwValue, setPwValue] = useState('')
+  const [errors, setErrors] = useState({})
+  const [busy, setBusy] = useState(false)
+
+  async function submit(e) {
+    e.preventDefault()
+    const errs = {}
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = 'Enter a valid university email address.'
+    if (pwValue.length < 6) errs.pw = 'Password must be at least 6 characters.'
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    setBusy(true)
+    try {
+      const user = await login(email, pwValue)
+      navigate(location.state?.from && user.role === 'student' ? location.state.from : roleHome(user.role), { replace: true })
+    } catch (err) {
+      setErrors({ form: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="login-wrap">
+      <div className="login-form-pane">
+        <form className="login-card" onSubmit={submit} noValidate>
+          <img src="/logo-ganpat.png" alt="Ganpat University" width="220" style={{ marginBottom: 28 }} />
+          <h1>Sign in to GUNI Scholar</h1>
+          <p className="sub">Use your Ganpat University account to access your courses, assignments and analytics.</p>
+
+          {errors.form && (
+            <div className="alert alert-bad mb-16" role="alert">
+              <div className="alert-body"><strong>Sign in failed</strong>{errors.form}</div>
+            </div>
+          )}
+
+          <Field label="University email" htmlFor="email" error={errors.email}>
+            <div className="icon-input">
+              <Mail aria-hidden="true" />
+              <input id="email" className="input" type="email" autoComplete="email" value={email}
+                onChange={(e) => setEmail(e.target.value)} aria-invalid={!!errors.email}
+                aria-describedby={errors.email ? 'email-error' : undefined} placeholder="name@ganpatuni.ac.in" />
+            </div>
+          </Field>
+          <Field label="Password" htmlFor="pw" error={errors.pw}>
+            <div className="icon-input">
+              <Lock aria-hidden="true" />
+              <input id="pw" className="input" type="password" autoComplete="current-password" value={pwValue}
+                onChange={(e) => setPwValue(e.target.value)} aria-invalid={!!errors.pw}
+                aria-describedby={errors.pw ? 'pw-error' : undefined} placeholder="Enter your password" />
+            </div>
+          </Field>
+
+          <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy}>
+            {busy ? 'Signing in...' : 'Sign in'}
+          </button>
+
+          <div className="demo-accounts">
+            <p className="hint">Prototype demo accounts. Password for every account: <code>{demoPassword}</code></p>
+            <div className="demo-chips">
+              {DEMO.map((d) => (
+                <button key={d.role} type="button" className="btn btn-secondary btn-sm"
+                  onClick={() => { setEmail(d.email); setPwValue(demoPassword); setErrors({}) }}
+                  aria-label={`Fill demo credentials for the ${d.role} account`}>
+                  {d.role}
+                </button>
+              ))}
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <aside className="login-brand-pane">
+        <img className="logo-img" src="/logo-ganpat-naac.png" alt="Ganpat University, NAAC A plus accredited" width="230" />
+        <div>
+          <h1>GUNI Scholar</h1>
+          <p className="lede">
+            One platform for courses, study material, assignments, assessments and academic analytics at
+            Ganpat University.
+          </p>
+          <ul className="login-points">
+            <li><CheckCircle2 aria-hidden="true" /> Track every course, deadline and submission in one place</li>
+            <li><CheckCircle2 aria-hidden="true" /> Topic-wise mastery with an explainable academic risk score</li>
+            <li><CheckCircle2 aria-hidden="true" /> Personalised study plans built from your weak topics</li>
+            <li><CheckCircle2 aria-hidden="true" /> Faculty and dean dashboards with actionable class insights</li>
+          </ul>
+        </div>
+        <div className="login-foot">
+          <span>Prototype, Hackathon 2026</span>
+          <Link to="/privacy">Privacy Policy</Link>
+          <Link to="/terms">Terms and Conditions</Link>
+        </div>
+      </aside>
+    </div>
+  )
+}

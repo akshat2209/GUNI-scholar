@@ -1,0 +1,188 @@
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { AlertTriangle, BookOpen, ChevronRight, TrendingDown } from 'lucide-react'
+import { Badge, Card, EmptyState, Loading, MasteryRow, PageHeader, StatCard, riskTone } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+export default function StudentDashboard() {
+  const { user } = useAuth()
+  const [params, setParams] = useSearchParams()
+  const courses = api.studentCourses(user.id)
+  const active = courses.find((c) => c.id === params.get('course')) || courses[0]
+  const [data, setData] = useState(null)
+  const [plan, setPlan] = useState(null)
+
+  useEffect(() => {
+    setData(null)
+    api.getStudentCourseAnalytics(user.id, active.id).then(setData)
+  }, [user.id, active.id])
+  useEffect(() => { api.getStudyPlan().then(setPlan) }, [])
+
+  if (!data) return <Loading label="Loading your dashboard" />
+
+  const upcoming = data.assignments.filter((a) => !a.submission)
+  const completed = plan ? plan.tasks.filter((t) => t.done).length : 0
+  const recentScores = [...data.scores].reverse().slice(-3)
+
+  return (
+    <div className="page">
+      <PageHeader
+        title={`Welcome back, ${user.name.split(' ')[0]}`}
+        sub={`Semester ${user.sem} progress across your enrolled courses. Analytics shown for ${active.code} ${active.short}.`}
+      />
+
+      <div className="wrap-gap" role="navigation" aria-label="Switch course for the summary panels">
+        {courses.map((c) => (
+          <Link key={c.id} to={`/student?course=${c.id}`} className={`btn btn-sm ${c.id === active.id ? 'btn-primary' : 'btn-secondary'}`} aria-current={c.id === active.id ? 'true' : undefined}>
+            {c.short}
+          </Link>
+        ))}
+      </div>
+
+      <div className="grid grid-4">
+        <StatCard label="Courses enrolled" value={courses.length} meta={`${user.dept}, semester ${user.sem}`} />
+        <StatCard label="Assessment average" value={`${Math.round(data.avgScore)}%`} meta={`${active.short} evaluated quizzes`} />
+        <StatCard label="Late submissions" value={data.lateStreak} meta={data.lateStreak >= 2 ? 'Consecutive, needs attention' : 'In a row'} />
+        <StatCard label="Pending deadlines" value={upcoming.length} meta={upcoming[0] ? `${upcoming[0].title}: due ${upcoming[0].due}` : 'Nothing due right now'} />
+      </div>
+
+      <div className="grid grid-2">
+        <Card title="Academic risk indicators" actions={<Badge tone={riskTone(data.risk.band)}>{data.risk.band} risk</Badge>}>
+          <div className="risk-score">
+            <span className="big" style={{ color: data.risk.band === 'High' ? 'var(--bad-text)' : data.risk.band === 'Medium' ? 'var(--warn-text)' : 'var(--ok-text)' }}>
+              {data.risk.score}
+            </span>
+            <p className="small muted" style={{ flex: 1, minWidth: 200 }}>
+              Your score is computed from fixed, explainable indicators. Each indicator below lists the evidence and
+              the points it contributes. No single exam decides your risk level.
+            </p>
+          </div>
+          {data.risk.indicators.length === 0 ? (
+            <EmptyState title="No risk indicators active">All monitored indicators are within healthy ranges. Keep it up.</EmptyState>
+          ) : (
+            <ul className="risk-list">
+              {data.risk.indicators.map((i) => (
+                <li key={i.label}>
+                  <AlertTriangle size={17} color="var(--warn-text)" aria-hidden="true" />
+                  <span><strong>{i.label} (+{i.points} pts).</strong> {i.evidence}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title={`Topic mastery in ${active.short}`} actions={<Link className="btn btn-secondary btn-sm" to={`/student/analytics/${active.id}`}>Full analytics <ChevronRight size={14} aria-hidden="true" /></Link>}>
+          {data.mastery.map((m) => <MasteryRow key={m.id} name={m.name} value={m.mastery} />)}
+        </Card>
+      </div>
+
+      <Card title="Personalised recommendations" sub="Generated from your weakest topics and the resources your faculty has published.">
+        {data.recommendations.length === 0 ? (
+          <EmptyState title="No recommendations right now">Your topic mastery is above the recommendation threshold across this course.</EmptyState>
+        ) : (
+          <div className="grid grid-3">
+            {data.recommendations.map((r) => (
+              <div key={r.topic.id} className="card card-pad" style={{ boxShadow: 'none' }}>
+                <Badge tone={r.mastery < 40 ? 'bad' : 'warn'}>{r.mastery}% mastery</Badge>
+                <h3 className="mt-8">{r.topic.name}</h3>
+                <p className="small muted mt-8">{r.reason}</p>
+                <ul style={{ listStyle: 'none', marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {r.resources.map((res) => (
+                    <li key={res.id}>
+                      <Link to={`/student/courses/${active.id}`} className="small" style={{ fontWeight: 600 }}>
+                        {res.title}
+                      </Link>
+                      <span className="small muted"> ({res.type}, {res.size})</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div className="grid grid-2">
+        <Card title="Upcoming deadlines" actions={<Link className="small" to="/student/assignments">All assignments</Link>} tight>
+          {upcoming.length === 0 ? (
+            <EmptyState title="No pending assignments">Everything assigned to you so far has been submitted.</EmptyState>
+          ) : upcoming.map((a) => (
+            <div key={a.id} className="res-row" style={{ padding: '14px 4px' }}>
+              <span className="res-icon"><BookOpen size={17} aria-hidden="true" /></span>
+              <div className="res-main">
+                <Link to={`/student/assignments/${a.id}`} className="res-title" style={{ textDecoration: 'none', color: 'inherit' }}>{a.title}</Link>
+                <div className="res-meta">{active.code} {active.short} &middot; due {a.due}</div>
+              </div>
+              <Badge tone="warn">Pending</Badge>
+            </div>
+          ))}
+        </Card>
+
+        <Card title="Today's study plan" actions={<Link className="small" to="/student/study-plan">Open plan</Link>} tight>
+          {!plan ? <Loading label="Loading plan" /> : (
+            <>
+              <div className="flex-between mb-8" style={{ marginTop: 6 }}>
+                <span className="small muted">{completed} of {plan.tasks.length} tasks completed</span>
+                <span className="small muted">{Math.round(100 * completed / plan.tasks.length)}%</span>
+              </div>
+              <div className={`progress ${completed === plan.tasks.length ? 'ok' : ''}`} aria-label={`Study plan progress: ${completed} of ${plan.tasks.length} tasks`}>
+                <span style={{ width: `${100 * completed / plan.tasks.length}%` }} />
+              </div>
+              <ul style={{ listStyle: 'none', marginTop: 12 }}>
+                {plan.tasks.filter((t) => !t.done).slice(0, 3).map((t) => (
+                  <li key={t.id} className="task-row">
+                    <span className="badge badge-neutral">{t.day}</span>
+                    <span className="task-title small">{t.title}</span>
+                  </li>
+                ))}
+                {plan.tasks.every((t) => t.done) && <EmptyState title="Plan complete">This week is fully done. Generate a fresh plan from the study plan page.</EmptyState>}
+              </ul>
+            </>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid grid-2">
+        <Card title="Recent assessment scores" tight>
+          {recentScores.map((s) => (
+            <div key={s.assessmentId} className="res-row">
+              <div className="res-main">
+                <div className="res-title">{s.title}</div>
+                <div className="res-meta">Submitted {s.submittedAt}</div>
+              </div>
+              <Badge tone={s.score / s.total >= 0.7 ? 'ok' : s.score / s.total >= 0.4 ? 'warn' : 'bad'}>
+                {s.score}/{s.total}
+              </Badge>
+            </div>
+          ))}
+          <div className="card-body-tight">
+            <p className="small muted flex" style={{ gap: 6 }}>
+              <TrendingDown size={15} aria-hidden="true" /> Scores have declined over the last two quizzes. The study plan targets the topics behind those drops.
+            </p>
+          </div>
+        </Card>
+
+        <Card title="Faculty feedback and announcements" tight>
+          {api.announcementsForCourse(active.id).length === 0 ? (
+            <EmptyState title="No announcements">Your faculty has not posted anything yet for this course.</EmptyState>
+          ) : api.announcementsForCourse(active.id).map((an) => (
+            <div key={an.id} className="ann-item">
+              <h3>{an.title}</h3>
+              <p className="ann-meta">{an.date} &middot; {api.getUser(an.authorId).name}</p>
+              <p className="small mt-8 muted">{an.body}</p>
+            </div>
+          ))}
+          <div className="card-body-tight">
+            <h3 className="mb-8">Latest feedback on your work</h3>
+            {[...data.assignments].filter((a) => a.submission?.feedback).slice(-1).map((a) => (
+              <p key={a.id} className="small muted">
+                <strong style={{ color: 'var(--ink-900)' }}>{a.title}:</strong> {a.submission.feedback}
+              </p>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  )
+}

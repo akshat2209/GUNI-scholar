@@ -1,0 +1,69 @@
+import { useState } from 'react'
+import { Badge, Card, EmptyState, Field, PageHeader } from '../../components/ui'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+export default function AdminCourses() {
+  const toast = useToast()
+  const [tick, setTick] = useState(0)
+  const faculty = api.users.filter((u) => u.role === 'faculty')
+
+  function assignFaculty(course, facultyId) {
+    course.facultyId = facultyId
+    setTick(tick + 1)
+    toast(`${course.code} assigned to ${api.getUser(facultyId).name}.`)
+  }
+  function toggleEnrollment(course, studentId) {
+    const list = api.enrollments[course.id] || []
+    api.enrollments[course.id] = list.includes(studentId) ? list.filter((s) => s !== studentId) : [...list, studentId]
+    setTick(tick + 1)
+    const s = api.getUser(studentId)
+    toast(api.enrollments[course.id].includes(studentId) ? `${s.name} enrolled in ${course.code}.` : `${s.name} removed from ${course.code}.`)
+  }
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Courses and Enrollments"
+        sub="Assign faculty to courses and manage student enrollments. Analytics access follows these assignments automatically."
+      />
+
+      {api.courses.map((c) => {
+        const f = api.getUser(c.facultyId)
+        const roster = api.enrollments[c.id] || []
+        const students = api.users.filter((u) => u.role === 'student')
+        return (
+          <Card key={c.id + tick} title={`${c.code} ${c.title}`} sub={`${c.credits} credits, semester ${c.sem} &middot; ${roster.length} enrolled`}>
+            <div className="form-row">
+              <Field label="Assigned faculty" htmlFor={`fac-${c.id}`}>
+                <select id={`fac-${c.id}`} className="select" value={c.facultyId} onChange={(e) => assignFaculty(c, e.target.value)}>
+                  {faculty.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Currently taught by">
+                <p style={{ padding: '9px 0', fontSize: 14 }}>{f ? `${f.name}, ${f.dept}` : 'Unassigned'}</p>
+              </Field>
+            </div>
+
+            <h3 className="mb-8">Enrollment</h3>
+            {students.length === 0 ? <EmptyState title="No students" /> : (
+              <div className="wrap-gap" role="group" aria-label={`Enroll students in ${c.code}`}>
+                {students.map((s) => {
+                  const inCourse = roster.includes(s.id)
+                  return (
+                    <button key={s.id} type="button"
+                      className={`btn btn-sm ${inCourse ? 'btn-primary' : 'btn-secondary'}`}
+                      aria-pressed={inCourse}
+                      onClick={() => toggleEnrollment(c, s.id)}>
+                      {s.name} {inCourse ? 'enrolled' : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+        )
+      })}
+    </div>
+  )
+}

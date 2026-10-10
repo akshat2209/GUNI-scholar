@@ -1,0 +1,101 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Card, EmptyState, Field, PageHeader, Badge } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+export default function FacultyAssignments() {
+  const { user } = useAuth()
+  const toast = useToast()
+  const myCourses = api.facultyCourses(user.id)
+  const [form, setForm] = useState({ courseId: '', topicId: '', title: '', due: '', maxMarks: 100, description: '' })
+  const [errors, setErrors] = useState({})
+
+  const rows = api.assignments.filter((a) => myCourses.some((c) => c.id === a.courseId))
+  const topics = form.courseId ? api.getTopics(form.courseId) : []
+
+  async function submit(e) {
+    e.preventDefault()
+    const errs = {}
+    if (!form.courseId) errs.courseId = 'Pick the course.'
+    if (!form.topicId) errs.topicId = 'Pick the topic the assignment assesses.'
+    if (form.title.trim().length < 6) errs.title = 'Title must be at least 6 characters.'
+    if (!form.due.trim()) errs.due = 'Set a deadline, for example "W9 Fri" or "in 5 days".'
+    if (form.description.trim().length < 20) errs.description = 'Describe the task in at least 20 characters so students know what to do.'
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    await api.createAssignment({ ...form, title: form.title.trim(), released: 'Today' })
+    toast('Assignment published. Students can see it under their deadlines now.')
+    setForm({ courseId: '', topicId: '', title: '', due: '', maxMarks: 100, description: '' })
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Assignments" sub="Publish assignments with deadlines and track how many submissions still need evaluation." />
+
+      <div className="grid grid-2" style={{ alignItems: 'start' }}>
+        <Card title="Create and publish an assignment">
+          <form onSubmit={submit} noValidate>
+            <Field label="Course" htmlFor="fcourse" error={errors.courseId}>
+              <select id="fcourse" className="select" value={form.courseId} onChange={(e) => setForm({ ...form, courseId: e.target.value, topicId: '' })} aria-invalid={!!errors.courseId}>
+                <option value="">Select course</option>
+                {myCourses.map((c) => <option key={c.id} value={c.id}>{c.code} {c.short}</option>)}
+              </select>
+            </Field>
+            <Field label="Topic" htmlFor="ftopic" error={errors.topicId} hint="Topic tagging powers the analytics and recommendations.">
+              <select id="ftopic" className="select" value={form.topicId} onChange={(e) => setForm({ ...form, topicId: e.target.value })} disabled={!form.courseId} aria-invalid={!!errors.topicId}>
+                <option value="">{form.courseId ? 'Select topic' : 'Pick a course first'}</option>
+                {topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Title" htmlFor="ftitle" error={errors.title}>
+              <input id="ftitle" className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} aria-invalid={!!errors.title} placeholder="Backtracking problem set" />
+            </Field>
+            <div className="form-row">
+              <Field label="Deadline" htmlFor="fdue" error={errors.due}>
+                <input id="fdue" className="input" value={form.due} onChange={(e) => setForm({ ...form, due: e.target.value })} aria-invalid={!!errors.due} placeholder="in 7 days" />
+              </Field>
+              <Field label="Maximum marks" htmlFor="fmarks">
+                <input id="fmarks" className="input" type="number" min="10" max="200" value={form.maxMarks} onChange={(e) => setForm({ ...form, maxMarks: Number(e.target.value) })} />
+              </Field>
+            </div>
+            <Field label="Instructions" htmlFor="fdesc" error={errors.description}>
+              <textarea id="fdesc" className="textarea" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-invalid={!!errors.description} />
+            </Field>
+            <button className="btn btn-primary">Publish assignment</button>
+          </form>
+        </Card>
+
+        <Card title="Published assignments" tight>
+          {rows.length === 0 ? (
+            <EmptyState title="No assignments yet">Publish your first assignment with the form.</EmptyState>
+          ) : (
+            <div className="table-wrap" style={{ border: 'none', boxShadow: 'none' }}>
+              <table className="data" style={{ minWidth: 480 }}>
+                <thead><tr><th>Title</th><th>Course</th><th>Due</th><th>Evaluation</th></tr></thead>
+                <tbody>
+                  {rows.map((a) => {
+                    const subs = api.submissionsForAssignment(a.id)
+                    const unevaluated = subs.filter((s) => s.status !== 'evaluated').length
+                    return (
+                      <tr key={a.id}>
+                        <td style={{ fontWeight: 600 }}>{a.title}</td>
+                        <td>{api.getCourse(a.courseId).short}</td>
+                        <td>{a.due}</td>
+                        <td>{unevaluated ? <Badge tone="warn">{unevaluated} to evaluate</Badge> : <Badge tone="ok">Evaluated</Badge>}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="card-body-tight">
+            <Link to="/faculty/evaluation" className="btn btn-secondary btn-sm">Open evaluation queue</Link>
+          </div>
+        </Card>
+      </div>
+    </div>
+  )
+}

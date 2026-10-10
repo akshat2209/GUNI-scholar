@@ -1,0 +1,141 @@
+import { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { Card, EmptyState, Field, Loading, PageHeader, Badge, Crumb } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+function statusOf(asg, sub) {
+  if (sub) return sub.status === 'evaluated' ? { tone: 'ok', label: `Evaluated: ${sub.marks}/${asg.maxMarks}` } : { tone: 'ok', label: 'Submitted' }
+  if (asg.due.startsWith('in ')) return { tone: 'warn', label: `Due ${asg.due}` }
+  return { tone: 'bad', label: 'Overdue' }
+}
+
+function AssignmentDetail({ assignmentId }) {
+  const { user } = useAuth()
+  const toast = useToast()
+  const [file, setFile] = useState(null)
+  const [error, setError] = useState('')
+  const asg = api.assignments.find((a) => a.id === assignmentId)
+  const mine = api.submissions.find((s) => s.assignmentId === assignmentId && s.studentId === user.id)
+  if (!asg) return <EmptyState title="Assignment not found" />
+  const course = api.getCourse(asg.courseId)
+  const topic = api.getTopic(asg.courseId, asg.topicId)
+  const status = statusOf(asg, mine)
+
+  function submit(e) {
+    e.preventDefault()
+    if (!file) { setError('Choose a file to upload before submitting.'); return }
+    toast(`Submission received for "${asg.title}".`)
+    setFile(null)
+  }
+
+  return (
+    <div className="page">
+      <Crumb to="/student/assignments">Back to assignments</Crumb>
+      <PageHeader
+        title={asg.title}
+        sub={`${course.code} ${course.short} &middot; Topic: ${topic?.name} &middot; Due ${asg.due} &middot; ${asg.maxMarks} marks`}
+        actions={<Badge tone={status.tone}>{status.label}</Badge>}
+      />
+
+      <div className="grid grid-2">
+        <Card title="Instructions">
+          <p style={{ fontSize: 14.5 }}>{asg.description}</p>
+          <h3 className="mt-24 mb-8">Attachments</h3>
+          <div className="res-row" style={{ borderBottom: 'none' }}>
+            <span className="res-icon">PDF</span>
+            <div className="res-main">
+              <div className="res-title">{asg.id}-handout.pdf</div>
+              <div className="res-meta">Assignment handout, 0.3 MB</div>
+            </div>
+          </div>
+        </Card>
+
+        <Card title="Submit your work">
+          {mine ? (
+            <>
+              <p className="small muted">Your submission history for this assignment.</p>
+              <table className="data mt-16" style={{ minWidth: 0 }}>
+                <thead><tr><th>Submitted</th><th>File</th><th className="num">Marks</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>{mine.submittedAt}</td>
+                    <td>{mine.fileName}</td>
+                    <td className="num">{mine.status === 'evaluated' ? `${mine.marks}/${asg.maxMarks}` : 'Pending'}</td>
+                  </tr>
+                </tbody>
+              </table>
+              {mine.feedback && (
+                <div className="alert alert-info mt-16">
+                  <div className="alert-body"><strong>Faculty feedback</strong>{mine.feedback}</div>
+                </div>
+              )}
+            </>
+          ) : (
+            <form onSubmit={submit} noValidate>
+              {asg.due.startsWith('in ') ? (
+                <p className="small muted mb-16">This assignment is open. Upload your solution file below before the deadline.</p>
+              ) : (
+                <div className="alert alert-warn mb-16">
+                  <div className="alert-body"><strong>Deadline passed</strong>A late submission will be recorded and reflected in your engagement indicators.</div>
+                </div>
+              )}
+              <Field label="Solution file" htmlFor="file" error={error} hint="PDF or ZIP up to 20 MB.">
+                <input id="file" className="input" type="file" accept=".pdf,.zip,.doc,.docx"
+                  onChange={(e) => { setFile(e.target.files[0] || null); setError('') }} aria-invalid={!!error} />
+              </Field>
+              <button className="btn btn-primary" type="submit">Submit assignment</button>
+            </form>
+          )}
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+export default function StudentAssignments() {
+  const { user } = useAuth()
+  const { assignmentId } = useParams()
+  const myCourses = api.studentCourses(user.id)
+  const rows = api.assignments
+    .filter((a) => myCourses.some((c) => c.id === a.courseId))
+    .map((a) => ({ asg: a, course: api.getCourse(a.courseId), sub: api.submissions.find((s) => s.assignmentId === a.id && s.studentId === user.id) }))
+  const pending = rows.filter((r) => !r.sub).length
+
+  if (assignmentId) return <AssignmentDetail assignmentId={assignmentId} />
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Assignments"
+        sub={`${rows.length} assignments across your courses this semester. ${pending} still pending.`}
+      />
+      {rows.length === 0 ? (
+        <Card><EmptyState title="No assignments yet">Your faculty has not released any assignments.</EmptyState></Card>
+      ) : (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr><th>Assignment</th><th>Course</th><th>Due</th><th>Status</th><th className="num">Marks</th></tr>
+            </thead>
+            <tbody>
+              {rows.map(({ asg, course, sub }) => {
+                const st = statusOf(asg, sub)
+                return (
+                  <tr key={asg.id}>
+                    <td><Link to={`/student/assignments/${asg.id}`} style={{ fontWeight: 600 }}>{asg.title}</Link></td>
+                    <td>{course.short}</td>
+                    <td>{asg.due}</td>
+                    <td><Badge tone={st.tone}>{st.label}</Badge></td>
+                    <td className="num">{sub?.status === 'evaluated' ? `${sub.marks}/${asg.maxMarks}` : 'Not graded'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}

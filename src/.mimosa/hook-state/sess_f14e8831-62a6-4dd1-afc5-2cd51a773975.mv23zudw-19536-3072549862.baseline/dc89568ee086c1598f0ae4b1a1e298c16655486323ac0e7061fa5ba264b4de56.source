@@ -1,0 +1,110 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { Badge, Card, EmptyState, Loading, PageHeader } from '../../components/ui'
+import KnowledgeGraph from '../../components/KnowledgeGraph'
+import { useAuth } from '../../context/AuthContext'
+import * as api from '../../data/api'
+
+export default function KnowledgeMap() {
+  const { user } = useAuth()
+  const { courseId } = useParams()
+  const courses = api.studentCourses(user.id)
+  const active = courses.find((c) => c.id === courseId) || courses[0]
+  const [loading, setLoading] = useState(true)
+  const [selectedId, setSelectedId] = useState(null)
+
+  useEffect(() => { setLoading(true); setSelectedId(null); const t = setTimeout(() => setLoading(false), 250); return () => clearTimeout(t) }, [active.id])
+
+  const mastery = useMemo(() => api.topicMastery(user.id, active.id), [user, active.id])
+  const masteryById = useMemo(() => Object.fromEntries(mastery.map((m) => [m.id, m.mastery])), [mastery])
+  const topics = api.getTopics(active.id)
+
+  if (loading) return <Loading label="Building your knowledge map" />
+
+  // Recommended learning sequence: prerequisites of weak topics first,
+  // ordered by prerequisite depth, so foundations are repaired before finals.
+  const weak = mastery.filter((m) => m.mastery != null && m.mastery < 55)
+  const depth = (t, memo = {}) => {
+    if (memo[t.id] != null) return memo[t.id]
+    return (memo[t.id] = t.prereqs.length ? 1 + Math.max(...t.prereqs.map((p) => depth(topics.find((x) => x.id === p), memo))) : 0)
+  }
+  const sequence = [...new Set(weak.flatMap((w) => [...w.prereqs, w.id]))]
+    .map((id) => mastery.find((m) => m.id === id))
+    .filter(Boolean)
+    .sort((a, b) => depth(a) - depth(b))
+
+  const selected = topics.find((t) => t.id === selectedId)
+  const selectedMastery = selected ? masteryById[selected.id] : null
+  const selectedResources = selected ? api.resourcesForCourse(active.id).filter((r) => r.topicId === selected.id) : []
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Knowledge Gap Dependency Map"
+        sub={`How the topics of ${active.code} ${active.title} depend on each other, and where your gaps sit in that chain. Select a topic node for detail.`}
+      />
+      <div className="wrap-gap" role="navigation" aria-label="Switch course">
+        {courses.map((c) => (
+          <Link key={c.id} to={`/student/knowledge-map/${c.id}`} className={`btn btn-sm ${c.id === active.id ? 'btn-primary' : 'btn-secondary'}`} aria-current={c.id === active.id ? 'true' : undefined}>
+            {c.short}
+          </Link>
+        ))}
+      </div>
+
+      <div className="kg-layout">
+        <KnowledgeGraph topics={topics} masteryById={masteryById} selectedId={selectedId} onSelect={setSelectedId} />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title={selected ? selected.name : 'Select a topic'} sub={selected ? `Prerequisites: ${selected.prereqs.map((p) => topics.find((t) => t.id === p)?.short).join(', ') || 'None, this is a foundation topic'}` : 'Click a topic in the graph to inspect it.'}>
+            {selected ? (
+              <>
+                <div className="flex mb-16">
+                  <span className="big" style={{ fontSize: 34, fontWeight: 800 }}>{selectedMastery == null ? 'N/A' : `${selectedMastery}%`}</span>
+                  <Badge tone={selectedMastery == null ? 'neutral' : selectedMastery >= 70 ? 'ok' : selectedMastery >= 40 ? 'warn' : 'bad'}>
+                    {selectedMastery == null ? 'Not assessed' : selectedMastery >= 70 ? 'Mastered' : selectedMastery >= 40 ? 'Developing' : 'Needs improvement'}
+                  </Badge>
+                </div>
+                <h3 className="mb-8">Learning material</h3>
+                {selectedResources.length === 0 ? (
+                  <p className="small muted">No resources published for this topic yet.</p>
+                ) : (
+                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {selectedResources.map((r) => (
+                      <li key={r.id} className="small">
+                        <Link to={`/student/courses/${active.id}`}>{r.title}</Link>
+                        <span className="muted"> ({r.type})</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Link className="btn btn-secondary btn-sm mt-16" to={`/student/assessments`}>Practice with quizzes</Link>
+              </>
+            ) : (
+              <p className="small muted">
+                The map shows mastery per topic and highlights weak prerequisites with dashed red edges so you can
+                see which foundation is pulling a topic down.
+              </p>
+            )}
+          </Card>
+
+          <Card title="Recommended learning sequence" sub="Weak topics and their prerequisites, foundations first.">
+            {sequence.length === 0 ? (
+              <EmptyState title="No sequence needed">No topic in this course is currently below the 55 percent comfort line.</EmptyState>
+            ) : (
+              <ol style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {sequence.map((m, i) => (
+                  <li key={m.id} style={{ fontSize: 14 }}>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: '2px 6px' }} onClick={() => setSelectedId(m.id)}>
+                      {i + 1}. {m.name} ({m.mastery}%)
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+            <p className="small muted mt-16">Follow this order before the next assessment: repairing prerequisites lifts every topic built on them.</p>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}

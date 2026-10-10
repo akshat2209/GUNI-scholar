@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-10-10T10:35:38.706Z",
+  "sessionId": "sess_d40e5f12-d52f-4258-ba58-2562a061f4e4",
+  "event": "PostToolUse",
+  "toolName": "Edit",
+  "file": "src/context/AuthContext.jsx",
+  "outcome": "clear",
+  "coverage": "complete",
+  "findingCount": 0,
+  "durationMs": 13,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

@@ -1,0 +1,87 @@
+import { useState } from 'react'
+import { Card, EmptyState, Field, PageHeader, Badge } from '../../components/ui'
+import { useToast } from '../../context/ToastContext'
+import * as api from '../../data/api'
+
+export default function FacultyEvaluation() {
+  const toast = useToast()
+  const myCourses = api.facultyCourses('fac-01')
+  const [courseId, setCourseId] = useState(myCourses[0]?.id || '')
+  const asgs = courseId ? api.assignmentsForCourse(courseId) : []
+  const [asgId, setAsgId] = useState(asgs[0]?.id || '')
+  const activeAsg = asgs.find((a) => a.id === asgId) || asgs[0]
+  const subs = activeAsg ? api.submissionsForAssignment(activeAsg.id) : []
+  const roster = courseId ? api.courseStudents(courseId) : []
+
+  function EvaluationRow({ sub }) {
+    const student = api.getUser(sub.studentId)
+    const [marks, setMarks] = useState(sub.marks ?? '')
+    const [feedback, setFeedback] = useState(sub.feedback ?? '')
+    const [err, setErr] = useState('')
+
+    async function save(e) {
+      e.preventDefault()
+      const m = Number(marks)
+      if (marks === '' || Number.isNaN(m) || m < 0 || m > activeAsg.maxMarks) {
+        setErr(`Marks must be between 0 and ${activeAsg.maxMarks}.`)
+        return
+      }
+      await api.saveEvaluation(activeAsg.id, sub.studentId, { marks: m, feedback: feedback.trim() })
+      setErr('')
+      toast(`Evaluation saved for ${student.name}: ${m}/${activeAsg.maxMarks}.`)
+    }
+
+    return (
+      <form onSubmit={save} style={{ borderBottom: '1px solid var(--border)', padding: '16px 0' }} noValidate>
+        <div className="flex-between">
+          <strong>{student.name} <span className="muted small">{student.rollNo}</span></strong>
+          <Badge tone={sub.submittedAt.includes('late') ? 'warn' : 'ok'}>{sub.submittedAt}</Badge>
+        </div>
+        <p className="small muted mt-8">Submitted file: {sub.fileName}</p>
+        <div className="form-row mt-8" style={{ alignItems: 'start' }}>
+          <Field label={`Marks (out of ${activeAsg.maxMarks})`} htmlFor={`m-${sub.id}`} error={err}>
+            <input id={`m-${sub.id}`} className="input" type="number" value={marks} onChange={(e) => { setMarks(e.target.value); setErr('') }} aria-invalid={!!err} style={{ maxWidth: 120 }} />
+          </Field>
+          <Field label="Feedback to the student" htmlFor={`f-${sub.id}`}>
+            <textarea id={`f-${sub.id}`} className="textarea" style={{ minHeight: 64 }} value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="What was right, what to fix, and which topic to revise." />
+          </Field>
+        </div>
+        <button className="btn btn-primary btn-sm">Save evaluation</button>
+      </form>
+    )
+  }
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Evaluation"
+        sub="Enter marks and feedback for submitted work. Publishing an evaluation updates the student's topic mastery and engagement indicators immediately."
+      />
+
+      <div className="filter-bar">
+        <div className="field">
+          <label htmlFor="ecourse">Course</label>
+          <select id="ecourse" className="select" value={courseId} onChange={(e) => { setCourseId(e.target.value); const first = api.assignmentsForCourse(e.target.value)[0]; setAsgId(first?.id || '') }}>
+            {myCourses.map((c) => <option key={c.id} value={c.id}>{c.code} {c.short}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="easg">Assignment</label>
+          <select id="easg" className="select" value={asgId} onChange={(e) => setAsgId(e.target.value)}>
+            {asgs.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {!activeAsg ? (
+        <Card><EmptyState title="No assignments in this course">Create one from the assignments page first.</EmptyState></Card>
+      ) : (
+        <Card title={`${activeAsg.title} submissions`} sub={`${subs.length} of ${roster.length} students submitted. ${subs.filter((s) => s.status !== 'evaluated').length} awaiting evaluation.`}>
+          {subs.length === 0 ? (
+            <EmptyState title="No submissions yet">Nothing has been turned in for this assignment.</EmptyState>
+          ) : subs.map((s) => <EvaluationRow key={s.id} sub={s} />)}
+        </Card>
+      )}
+    </div>
+  )
+}
